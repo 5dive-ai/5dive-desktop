@@ -1,12 +1,19 @@
 // 5dive for Mac: the 5dive web app in its own window, plus a menu-bar icon that
 // shows when an agent is waiting on you and opens that task on click.
 const path = require("node:path");
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, shell } = require("electron");
+const fs = require("node:fs");
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, screen, shell } = require("electron");
 const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 
 const START_URL = "https://5dive.app";
 const APP_URL = "https://my.5dive.ai";
-const POLL_MS = 60_000;
+// CAPTURE-ONLY (DIVE-8583, never merged): FIVEDIVE_CAPTURE=<dir> lets the CI
+// shot job drive the real app: a debug port for the sign-in, a fast poll, the
+// window parked beside the menu-bar icon, and trigger files that open the
+// icon's own menu or fire the real notification, as a click or a new task would.
+const CAPTURE = process.env.FIVEDIVE_CAPTURE || "";
+if (CAPTURE) app.commandLine.appendSwitch("remote-debugging-port", "9222");
+const POLL_MS = CAPTURE ? 5_000 : 60_000;
 
 // Sign-in and payment pages may open in a popup; let those stay in the app.
 // Anything else a page opens in a new window goes to the default browser.
@@ -65,6 +72,10 @@ function createWindow() {
     return { action: "deny" };
   });
 
+  if (CAPTURE) {
+    const { workArea } = screen.getPrimaryDisplay();
+    win.setPosition(workArea.x + workArea.width - 1200 - 24, workArea.y + 36);
+  }
   win.once("ready-to-show", () => win.show());
   win.webContents.on("did-finish-load", () => setTimeout(poll, 3000));
 
@@ -105,13 +116,39 @@ async function poll() {
   if (next.state === "unknown" && inbox.state === "ok") return;
   notifyNew(next);
   render(next);
+  if (CAPTURE) captureState();
+}
+
+function captureState() {
+  try {
+    fs.writeFileSync(
+      path.join(CAPTURE, "state.json"),
+      JSON.stringify({ state: inbox.state, count: inbox.count, items: inbox.items.length, url: win.webContents.getURL().split("?")[0] }),
+    );
+  } catch {}
+}
+
+function captureTriggers() {
+  const take = (name) => {
+    const f = path.join(CAPTURE, name);
+    if (!fs.existsSync(f)) return false;
+    fs.rmSync(f, { force: true });
+    return true;
+  };
+  if (take("notify")) notify(inbox.items);
+  if (take("menu")) tray.popUpContextMenu();
 }
 
 function notifyNew(next) {
   if (next.state !== "ok") return;
   const fresh = next.items.filter((t) => !seen.has(t.ident));
   seen = new Set(next.items.map((t) => t.ident));
-  if (inbox.state !== "ok" || !fresh.length || !Notification.isSupported()) return;
+  if (inbox.state !== "ok") return;
+  notify(fresh);
+}
+
+function notify(fresh) {
+  if (!fresh.length || !Notification.isSupported()) return;
   const t = fresh[0];
   const n = new Notification({
     title: `${t.agent || "An agent"} needs you`,
@@ -210,5 +247,6 @@ if (!app.requestSingleInstanceLock()) {
     render(inbox);
     createWindow();
     setInterval(poll, POLL_MS);
+    if (CAPTURE) setInterval(captureTriggers, 500);
   });
 }

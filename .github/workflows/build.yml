@@ -8,12 +8,22 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      ticket:
+        description: "CAPTURE-ONLY (DIVE-8583): one-time Clerk sign-in ticket for the demo account"
+        required: false
+        default: ""
+      path:
+        description: "page to open after sign-in"
+        required: false
+        default: "/"
 
 permissions:
   contents: write
 
 jobs:
   mac:
+    if: github.event_name != 'workflow_dispatch' || inputs.ticket == ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,3 +60,40 @@ jobs:
           files: |
             dist/*.dmg
             dist/*.zip
+
+  # CAPTURE-ONLY (DIVE-8583, never merged): the real app, signed in to the demo
+  # account, with its menu-bar menu open. Dispatched with a one-time ticket.
+  capture:
+    if: github.event_name == 'workflow_dispatch' && inputs.ticket != ''
+    runs-on: macos-latest
+    steps:
+      - name: Mask the ticket
+        run: echo "::add-mask::${{ inputs.ticket }}"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the app (this Mac's arch only)
+        run: npx electron-builder --mac --dir --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Launch, sign in, shoot
+        env:
+          FIVEDIVE_CAPTURE: ${{ runner.temp }}/cap
+          SIGNIN_TICKET: ${{ inputs.ticket }}
+          SHOT_PATH: ${{ inputs.path }}
+        run: |
+          mkdir -p "$FIVEDIVE_CAPTURE"
+          system_profiler SPDisplaysDataType | grep -i resolution || true
+          APP=$(ls -d dist/mac*/5dive.app | head -1)
+          "$APP/Contents/MacOS/5dive" > app.log 2>&1 &
+          sleep 8
+          node capture/drive.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture
+          retention-days: 3
+          path: shots/
