@@ -68,8 +68,13 @@ jobs:
     if: (github.event_name == 'workflow_dispatch' && inputs.ticket != '') || (github.event_name == 'pull_request' && github.head_ref == 'dive-8583-capture')
     runs-on: macos-latest
     steps:
+      # The ticket is read at run time from the event file, never through a
+      # ${{ }} expression or env: block, so no step header prints it.
       - name: Mask the ticket
-        run: echo "::add-mask::${{ inputs.ticket }}"
+        run: |
+          T=$(jq -r '.inputs.ticket // empty' "$GITHUB_EVENT_PATH")
+          [ -n "$T" ] && echo "::add-mask::$T"
+          true
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -83,9 +88,10 @@ jobs:
       - name: Launch, sign in, shoot
         env:
           FIVEDIVE_CAPTURE: ${{ runner.temp }}/cap
-          SIGNIN_TICKET: ${{ inputs.ticket || 'dry' }}
           SHOT_PATH: ${{ inputs.path || '/' }}
         run: |
+          SIGNIN_TICKET=$(jq -r '.inputs.ticket // empty' "$GITHUB_EVENT_PATH")
+          export SIGNIN_TICKET="${SIGNIN_TICKET:-dry}"
           mkdir -p "$FIVEDIVE_CAPTURE"
           system_profiler SPDisplaysDataType | grep -i resolution || true
           APP=$(ls -d dist/mac*/5dive.app | head -1)

@@ -92,6 +92,13 @@ if (!/complete|already/.test(String(signed))) {
   process.exit(2);
 }
 
+// The demo account's name and email are a real company address: hide the
+// account chip and avatar on every page load (the only pixels changed).
+const HIDE = `(() => { const css = 'span.min-w-0.flex-col:has(> strong.truncate + small.truncate), img[src*="clerk.com"], img[src*="img.clerk"], [class*="cl-userButton"] { visibility: hidden !important; }';
+  const add = () => { if (document.getElementById('cap-hide')) return; const s = document.createElement('style'); s.id = 'cap-hide'; s.textContent = css; (document.head || document.documentElement).appendChild(s); };
+  add(); document.addEventListener('DOMContentLoaded', add); })()`;
+await c.send("Page.addScriptToEvaluateOnNewDocument", { source: HIDE });
+await c.evaluate(HIDE);
 await c.send("Page.navigate", { url: new URL(PAGE, "https://my.5dive.ai").toString() });
 let s = null;
 for (let i = 0; i < 48; i++) {
@@ -101,6 +108,7 @@ for (let i = 0; i < 48; i++) {
 }
 log("inbox", s || {});
 await sleep(8000); // let the page finish drawing
+log("hidden", { chips: await c.evaluate(`document.querySelectorAll('span.min-w-0.flex-col:has(> strong.truncate + small.truncate), [class*="cl-userButton"]').length`) });
 shot("1-window");
 fs.writeFileSync(path.join(DIR, "notify"), "");
 await sleep(4000);
