@@ -28,14 +28,12 @@
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "artifactName": "5dive-mac.${ext}"
     },
     "dmg": {
       "artifactName": "5dive.dmg",
       "title": "5dive ${version}"
-    },
-    "zip": {
-      "artifactName": "5dive-mac.zip"
     }
   }
 }
