@@ -56,12 +56,11 @@ function createWindow() {
     },
   });
 
-  // Google refuses sign-in from browsers that announce themselves as Electron.
-  const ua = win.webContents.getUserAgent().replace(/\s(Electron|5dive)\/\S+/g, "");
-  win.webContents.setUserAgent(ua);
-
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isInApp(url)) return { action: "allow" };
+    // Sign-in popups share the window's saved session, so the sign-in sticks.
+    if (isInApp(url)) {
+      return { action: "allow", overrideBrowserWindowOptions: { webPreferences: { partition: "persist:5dive" } } };
+    }
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
@@ -201,6 +200,9 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
   });
   app.on("activate", () => show());
+
+  // Google refuses sign-in from browsers that announce themselves as Electron.
+  app.userAgentFallback = app.userAgentFallback.replace(/\s(Electron|5dive)\/\S+/g, "");
 
   app.whenReady().then(() => {
     appMenu();
