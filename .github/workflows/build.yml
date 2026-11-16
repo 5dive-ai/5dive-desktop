@@ -64,7 +64,8 @@ jobs:
   # CAPTURE-ONLY (DIVE-8583, never merged): the real app, signed in to the demo
   # account, with its menu-bar menu open. Dispatched with a one-time ticket.
   capture:
-    if: github.event_name == 'workflow_dispatch' && inputs.ticket != ''
+    # A push to the capture branch runs it dry (signed out) to prove the plumbing.
+    if: (github.event_name == 'workflow_dispatch' && inputs.ticket != '') || (github.event_name == 'pull_request' && github.head_ref == 'dive-8583-capture')
     runs-on: macos-latest
     steps:
       - name: Mask the ticket
@@ -82,8 +83,8 @@ jobs:
       - name: Launch, sign in, shoot
         env:
           FIVEDIVE_CAPTURE: ${{ runner.temp }}/cap
-          SIGNIN_TICKET: ${{ inputs.ticket }}
-          SHOT_PATH: ${{ inputs.path }}
+          SIGNIN_TICKET: ${{ inputs.ticket || 'dry' }}
+          SHOT_PATH: ${{ inputs.path || '/' }}
         run: |
           mkdir -p "$FIVEDIVE_CAPTURE"
           system_profiler SPDisplaysDataType | grep -i resolution || true
@@ -96,4 +97,6 @@ jobs:
         with:
           name: capture
           retention-days: 3
-          path: shots/
+          path: |
+            shots/
+            app.log
