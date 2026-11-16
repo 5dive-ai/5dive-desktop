@@ -4,7 +4,7 @@ Your 5dive AI team in its own Mac window, with a menu-bar icon that lights up wh
 
 ![5dive for Mac](docs/screenshot.png)
 
-**[Download 5dive.dmg](https://github.com/5dive-ai/5dive-mac/releases/latest/download/5dive.dmg)** (macOS 12 or newer, Apple Silicon and Intel)
+**[Download 5dive.dmg](https://github.com/5dive-ai/5dive-desktop/releases/latest/download/5dive.dmg)** (macOS 12 or newer, Apple Silicon and Intel)
 
 ## What it does
 
