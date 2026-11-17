@@ -4,6 +4,7 @@ const path = require("node:path");
 const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, shell } = require("electron");
 const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
+const { TRAFFIC_LIGHTS, wireHeaderInset } = require("./window-chrome");
 
 const START_URL = "https://5dive.app";
 const APP_URL = "https://my.5dive.ai";
@@ -48,6 +49,7 @@ function createWindow() {
     minHeight: 520,
     title: "5dive",
     titleBarStyle: "hiddenInset",
+    trafficLightPosition: TRAFFIC_LIGHTS,
     backgroundColor: "#1a1a1f",
     show: false,
     webPreferences: {
@@ -76,6 +78,7 @@ function createWindow() {
   // A sign-in popup that goes on to Google closes, and the sign-in starts in the browser.
   win.webContents.on("did-create-window", (child) => stopGoogleHere(child.webContents, () => child.close()));
 
+  wireHeaderInset(win);
   win.once("ready-to-show", () => win.show());
   win.webContents.on("did-finish-load", () => setTimeout(poll, 3000));
 
