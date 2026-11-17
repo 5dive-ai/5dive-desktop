@@ -4,7 +4,7 @@ Your AI team in its own Mac window. The menu bar shows when an agent needs you.
 
 **[Download 5dive.dmg](https://github.com/5dive-ai/5dive/releases/latest/download/5dive.dmg)** · macOS 12 or newer · Apple Silicon and Intel · free and open source (MIT)
 
-![5dive for Mac: your team in its own window, and the menu bar menu listing the agents waiting on you](docs/screenshot.png)
+![5dive for Mac: your team in its own window, a chat open beside the list, and the menu-bar badge counting who needs you](docs/screenshot.png)
 
 ## What it does
 
