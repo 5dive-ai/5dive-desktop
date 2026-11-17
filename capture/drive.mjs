@@ -95,7 +95,7 @@ if (!/complete|already/.test(String(signed))) {
 
 // The demo account's name and email are a real company address: hide the
 // account chip and avatar on every page load (the only pixels changed).
-const HIDE = `(() => { const css = 'span.min-w-0.flex-col:has(> strong.truncate + small.truncate), img[src*="clerk.com"], img[src*="img.clerk"], [class*="cl-userButton"] { visibility: hidden !important; }';
+const HIDE = `(() => { const css = 'span.min-w-0.flex-col:has(> strong.truncate + small.truncate), img[src*="clerk.com"], img[src*="img.clerk"], [class*="cl-userButton"], [data-testid="simple-account"], [data-testid="simple-account"] * { visibility: hidden !important; opacity: 0 !important; }';
   const add = () => { if (document.getElementById('cap-hide')) return; const s = document.createElement('style'); s.id = 'cap-hide'; s.textContent = css; (document.head || document.documentElement).appendChild(s); };
   add(); document.addEventListener('DOMContentLoaded', add); })()`;
 await c.send("Page.addScriptToEvaluateOnNewDocument", { source: HIDE });
@@ -103,6 +103,9 @@ await c.evaluate(HIDE);
 // DIVE-8659: the README shot must not show Team's "turn on notifications" card.
 // Waving it away is what "Not now" does: the same localStorage key (simple-notify.tsx).
 await c.evaluate(`localStorage.setItem("5dive.push-card.dismissed", "1")`);
+// Nor the chat's one-time "Talk to <name> out loud · Got it" tip over the header:
+// it is shown once per browser, then this key is set (chat-voice-note.ts TALK_HINT_KEY).
+await c.evaluate(`localStorage.setItem("5dive.voice.talkHinted", "1")`);
 await c.send("Page.navigate", { url: new URL(PAGE, "https://my.5dive.ai").toString() });
 let s = null;
 for (let i = 0; i < 48; i++) {
@@ -129,6 +132,8 @@ await sleep(8000); // let the page finish drawing
 log("checks", JSON.parse(await c.evaluate(`JSON.stringify({
   chips: document.querySelectorAll('span.min-w-0.flex-col:has(> strong.truncate + small.truncate), [class*="cl-userButton"]').length,
   pushCard: document.querySelectorAll('[data-push-card]').length,
+  talkHint: document.querySelectorAll('[data-testid="voice-talk-hint"]').length,
+  account: [...document.querySelectorAll('[data-testid="simple-account"]')].filter((e) => getComputedStyle(e).visibility !== "hidden").length,
   path: location.pathname.split('/').length - 1,
 })`)));
 shot("1-window");
