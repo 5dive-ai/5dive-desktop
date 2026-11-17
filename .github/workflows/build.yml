@@ -1,7 +1,10 @@
 name: build
 
-# Every push and PR builds the .dmg on a real Mac and opens it once (smoke).
-# A tag v* also publishes a GitHub Release with the .dmg attached.
+# Every push and PR builds the .dmg on a real Mac and opens it once (smoke), and
+# the Windows installer on a real Windows runner: silent install, launch, the
+# Google sign-in hand-back, a second launch (smoke, .github/scripts/win-smoke.mjs).
+# A tag v* also publishes ONE GitHub Release with 5dive.dmg and 5dive-setup.exe,
+# only once both builds passed.
 on:
   push:
     branches: [main]
@@ -42,9 +45,53 @@ jobs:
           path: |
             dist/*.dmg
             smoke.png
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build the x64 installer (unsigned)
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Silent install
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\5dive-setup.exe -ArgumentList '/S' -Wait -PassThru
+          "installer exit $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { exit 1 }
+          # A one-click per-user install goes to Programs\<package.json name>.
+          Get-ChildItem "$env:LOCALAPPDATA\Programs" -Directory | Select-Object -ExpandProperty Name
+          Get-Item "$env:LOCALAPPDATA\Programs\5dive\5dive.exe" | Select-Object FullName, Length
+      - name: Smoke - launch, sign-in hand-back, second launch, shots
+        run: node .github/scripts/win-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 5dive-windows
+          path: |
+            dist/5dive-setup.exe
+            shots/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          # ** because an artifact's folder layout depends on which files it got.
+          fail_on_unmatched_files: true
           files: |
-            dist/*.dmg
+            out/5dive-mac/**/5dive.dmg
+            out/5dive-windows/**/5dive-setup.exe

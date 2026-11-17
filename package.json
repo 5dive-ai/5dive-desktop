@@ -1,8 +1,8 @@
 {
-  "name": "5dive-mac",
+  "name": "5dive",
   "productName": "5dive",
-  "version": "0.1.1",
-  "description": "5dive for Mac: your AI team in its own window, with a menu-bar icon that lights up when an agent needs you.",
+  "version": "0.2.0",
+  "description": "5dive for Mac and Windows: your AI team in its own window, with a menu-bar or tray icon that lights up when an agent needs you.",
   "homepage": "https://github.com/5dive-ai/5dive-desktop",
   "license": "MIT",
   "author": "5dive",
@@ -10,7 +10,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "dist": "electron-builder --mac dmg --universal --publish never"
+    "dist": "electron-builder --mac dmg --universal --publish never",
+    "dist:win": "electron-builder --win nsis --x64 --publish never"
   },
   "devDependencies": {
     "electron": "44.11.3",
@@ -34,6 +35,17 @@
     "dmg": {
       "artifactName": "5dive.dmg",
       "title": "5dive ${version}"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "5dive-setup.${ext}",
+      "shortcutName": "5dive",
+      "uninstallDisplayName": "5dive"
     }
   }
 }
