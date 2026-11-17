@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
-const { TRAFFIC_LIGHTS, HEADER_INSET_PX, HEADER_INSET_CSS, wireHeaderInset } = require("../src/window-chrome");
+const { TRAFFIC_LIGHTS, HEADER_INSET_PX, MARK_HEADER_PADDING_PX, HEADER_INSET_CSS, wireHeaderInset } = require("../src/window-chrome");
 
 const BUTTONS_WIDTH = 52; // three 12px buttons, 8px apart, plus their outer edge
 const HEADER_HEIGHT = 56; // simple-frame.tsx: h-14
@@ -34,7 +34,14 @@ test("the 5dive name starts to the right of the window buttons", () => {
   const buttonsRight = TRAFFIC_LIGHTS.x + BUTTONS_WIDTH;
   const nameLeft = HEADER_INSET_PX + ROW_PADDING_MIN;
   assert.ok(nameLeft >= buttonsRight + 8, `name at ${nameLeft}px, buttons end at ${buttonsRight}px`);
-  assert.match(HEADER_INSET_CSS, /^\[data-testid="simple-top-bar"\] \{ padding-left: \d+px !important; \}$/);
+  assert.match(HEADER_INSET_CSS, /^\[data-testid="simple-top-bar"\] \{ padding-left: \d+px !important; \}$/m);
+});
+
+test("signed out, the 5 mark also starts to the right of the window buttons", () => {
+  const buttonsRight = TRAFFIC_LIGHTS.x + BUTTONS_WIDTH;
+  assert.ok(MARK_HEADER_PADDING_PX >= buttonsRight + 8, `mark at ${MARK_HEADER_PADDING_PX}px`);
+  // sign-up-chrome.tsx: the mark is a direct child of the header
+  assert.match(HEADER_INSET_CSS, /^header:has\(> \[data-testid="mark-home"\]\) \{ padding-left: \d+px !important; \}$/m);
 });
 
 test("every page load gets the inset", async () => {
