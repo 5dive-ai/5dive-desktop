@@ -8,12 +8,18 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      ticket:
+        description: "CAPTURE-ONLY (DIVE-8657): one-time Clerk sign-in ticket for the demo account"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
   mac:
+    if: github.event_name != 'workflow_dispatch' || inputs.ticket == ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,3 +56,49 @@ jobs:
           files: |
             dist/*.dmg
             dist/*.zip
+
+  # CAPTURE-ONLY (DIVE-8657, never merged): a fresh install on a real Mac taps
+  # Google, the app opens the browser page, and the 127.0.0.1 hand-back signs the
+  # app in. A PR from this branch runs it dry (dummy ticket); a dispatch with a
+  # one-time ticket runs it signed in.
+  capture:
+    if: (github.event_name == 'workflow_dispatch' && inputs.ticket != '') || (github.event_name == 'pull_request' && github.head_ref == 'dive-8657-capture')
+    runs-on: macos-latest
+    steps:
+      # The ticket is read at run time from the event file, never through a
+      # ${{ }} expression or env: block, so no step header prints it.
+      - name: Mask the ticket
+        run: |
+          T=$(jq -r '.inputs.ticket // empty' "$GITHUB_EVENT_PATH")
+          [ -n "$T" ] && echo "::add-mask::$T"
+          true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the app (this Mac's arch only)
+        run: npx electron-builder --mac --dir --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Fresh install, tap Google, hand back, shoot
+        env:
+          FIVEDIVE_CAPTURE: ${{ runner.temp }}/cap
+        run: |
+          SIGNIN_TICKET=$(jq -r '.inputs.ticket // empty' "$GITHUB_EVENT_PATH")
+          export SIGNIN_TICKET="${SIGNIN_TICKET:-dry}"
+          mkdir -p "$FIVEDIVE_CAPTURE"
+          echo "default browser: $(defaults read ~/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure 2>/dev/null | grep -B1 -A3 'LSHandlerURLScheme = https' | grep LSHandlerRoleAll || echo system-default)"
+          APP=$(ls -d dist/mac*/5dive.app | head -1)
+          "$APP/Contents/MacOS/5dive" > app.log 2>&1 &
+          sleep 8
+          node capture/google.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture
+          retention-days: 3
+          path: |
+            shots/
+            app.log

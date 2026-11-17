@@ -1,13 +1,29 @@
 // 5dive for Mac: the 5dive web app in its own window, plus a menu-bar icon that
 // shows when an agent is waiting on you and opens that task on click.
 const path = require("node:path");
+const fs = require("node:fs");
 const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, shell } = require("electron");
 const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
 
 const START_URL = "https://5dive.app";
 const APP_URL = "https://my.5dive.ai";
-const POLL_MS = 60_000;
+// CAPTURE-ONLY (DIVE-8657, never merged): FIVEDIVE_CAPTURE=<dir> opens a debug
+// port so the CI job can tap the page's own Google button, and writes state.json
+// (inbox state, the window's page, the browser sign-in page the app opened).
+const CAPTURE = process.env.FIVEDIVE_CAPTURE || "";
+if (CAPTURE) app.commandLine.appendSwitch("remote-debugging-port", "9222");
+const POLL_MS = CAPTURE ? 5_000 : 60_000;
+let openedInBrowser = "";
+function captureState() {
+  if (!CAPTURE || !win || win.isDestroyed()) return;
+  try {
+    fs.writeFileSync(
+      path.join(CAPTURE, "state.json"),
+      JSON.stringify({ state: inbox.state, count: inbox.count, items: inbox.items.length, page: win.webContents.getURL().split("?")[0], browser: openedInBrowser }),
+    );
+  } catch {}
+}
 
 // Sign-in and payment pages may open in a popup; let those stay in the app.
 // Anything else a page opens in a new window goes to the default browser.
@@ -106,6 +122,7 @@ function stopGoogleHere(contents, after = () => {}) {
 async function signInInBrowser() {
   // A second tap while one is under way re-opens the same page (same port, same state).
   if (browserSignIn) return shell.openExternal(browserSignIn.url);
+  // (capture: noted below, once the listener is up)
   try {
     browserSignIn = await listen({
       appUrl: APP_URL,
@@ -121,6 +138,8 @@ async function signInInBrowser() {
     browserSignIn = null;
     return;
   }
+  openedInBrowser = browserSignIn.url;
+  captureState();
   shell.openExternal(browserSignIn.url);
 }
 
@@ -151,6 +170,7 @@ async function poll() {
   if (next.state === "unknown" && inbox.state === "ok") return;
   notifyNew(next);
   render(next);
+  captureState();
 }
 
 function notifyNew(next) {
@@ -185,6 +205,7 @@ function render(next) {
   );
   app.setBadgeCount(waiting ? next.count : 0);
   tray.setContextMenu(buildMenu());
+  captureState();
 }
 
 function buildMenu() {
