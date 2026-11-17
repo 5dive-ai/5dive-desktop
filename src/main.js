@@ -3,6 +3,7 @@
 const path = require("node:path");
 const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, shell } = require("electron");
 const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
+const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
 
 const START_URL = "https://5dive.app";
 const APP_URL = "https://my.5dive.ai";
@@ -10,10 +11,11 @@ const POLL_MS = 60_000;
 
 // Sign-in and payment pages may open in a popup; let those stay in the app.
 // Anything else a page opens in a new window goes to the default browser.
+// Google's sign-in is neither: it refuses to run inside the app, so it starts
+// over in the browser and comes back signed in (browser-sign-in.js, DIVE-8657).
 const IN_APP_HOSTS = [
   /(^|\.)5dive\.(ai|app|com)$/,
   /(^|\.)clerk\.(com|accounts\.dev)$/,
-  /^accounts\.google\.com$/,
   /^appleid\.apple\.com$/,
   /(^|\.)stripe\.com$/,
 ];
@@ -23,6 +25,7 @@ let tray = null;
 let inbox = { state: "unknown", count: 0, items: [] };
 let seen = new Set();
 let quitting = false;
+let browserSignIn = null; // the open 127.0.0.1 listener while a browser sign-in is under way
 
 function isInApp(url) {
   try {
@@ -57,6 +60,10 @@ function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isGoogleSignIn(url)) {
+      signInInBrowser();
+      return { action: "deny" };
+    }
     // Sign-in popups share the window's saved session, so the sign-in sticks.
     if (isInApp(url)) {
       return { action: "allow", overrideBrowserWindowOptions: { webPreferences: { partition: "persist:5dive" } } };
@@ -64,6 +71,10 @@ function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
+
+  stopGoogleHere(win.webContents);
+  // A sign-in popup that goes on to Google closes, and the sign-in starts in the browser.
+  win.webContents.on("did-create-window", (child) => stopGoogleHere(child.webContents, () => child.close()));
 
   win.once("ready-to-show", () => win.show());
   win.webContents.on("did-finish-load", () => setTimeout(poll, 3000));
@@ -76,6 +87,41 @@ function createWindow() {
   });
 
   win.loadURL(START_URL);
+}
+
+// The page inside the app is about to go to Google (a link, a script, a redirect):
+// stop it there and do the sign-in in the default browser instead.
+function stopGoogleHere(contents, after = () => {}) {
+  const guard = (event, legacyUrl) => {
+    const url = legacyUrl || event.url;
+    if (!isGoogleSignIn(url)) return;
+    event.preventDefault();
+    signInInBrowser();
+    after();
+  };
+  contents.on("will-navigate", guard);
+  contents.on("will-redirect", guard);
+}
+
+async function signInInBrowser() {
+  // A second tap while one is under way re-opens the same page (same port, same state).
+  if (browserSignIn) return shell.openExternal(browserSignIn.url);
+  try {
+    browserSignIn = await listen({
+      appUrl: APP_URL,
+      onTicket: (ticket) => {
+        show(ticketUrl(APP_URL, ticket));
+        app.focus({ steal: true });
+      },
+      onClose: () => {
+        browserSignIn = null;
+      },
+    });
+  } catch {
+    browserSignIn = null;
+    return;
+  }
+  shell.openExternal(browserSignIn.url);
 }
 
 function show(url) {
@@ -201,7 +247,8 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("activate", () => show());
 
-  // Google refuses sign-in from browsers that announce themselves as Electron.
+  // Google refuses sign-in from browsers that announce themselves as Electron (and, since
+  // DIVE-8657, from the app at all: its sign-in runs in the default browser, browser-sign-in.js).
   app.userAgentFallback = app.userAgentFallback.replace(/\s(Electron|5dive)\/\S+/g, "");
 
   app.whenReady().then(() => {
