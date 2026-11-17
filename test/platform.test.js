@@ -48,6 +48,8 @@ test("Windows build: x64 NSIS installer named 5dive-setup.exe with an .ico", () 
   assert.ok(fs.existsSync(path.join(ROOT, pkg.build.win.icon)));
   assert.equal(pkg.build.nsis.artifactName, "5dive-setup.${ext}");
   assert.match(pkg.scripts["dist:win"], /--win nsis --x64/);
+  // A one-click per-user install goes to %LOCALAPPDATA%\Programs\<package name>.
+  assert.equal(pkg.name, "5dive");
   // The .ico starts with the ICO header (reserved 0, type 1).
   const head = fs.readFileSync(path.join(ROOT, pkg.build.win.icon)).subarray(0, 4);
   assert.deepEqual([...head], [0, 0, 1, 0]);

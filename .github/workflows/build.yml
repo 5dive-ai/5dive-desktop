@@ -66,7 +66,9 @@ jobs:
           $p = Start-Process dist\5dive-setup.exe -ArgumentList '/S' -Wait -PassThru
           "installer exit $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { exit 1 }
-          Get-ChildItem "$env:LOCALAPPDATA\Programs\5dive" | Select-Object Name, Length
+          # A one-click per-user install goes to Programs\<package.json name>.
+          Get-ChildItem "$env:LOCALAPPDATA\Programs" -Directory | Select-Object -ExpandProperty Name
+          Get-Item "$env:LOCALAPPDATA\Programs\5dive\5dive.exe" | Select-Object FullName, Length
       - name: Smoke - launch, sign-in hand-back, second launch, shots
         run: node .github/scripts/win-smoke.mjs
       - uses: actions/upload-artifact@v4
