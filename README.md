@@ -2,7 +2,7 @@
 
 Your AI team in its own Mac window. The menu bar shows when an agent needs you.
 
-**[Download 5dive.dmg](https://github.com/5dive-ai/5dive-desktop/releases/latest/download/5dive.dmg)** · macOS 12 or newer · Apple Silicon and Intel · free and open source (MIT)
+**[Download 5dive.dmg](https://github.com/5dive-ai/5dive/releases/latest/download/5dive.dmg)** · macOS 12 or newer · Apple Silicon and Intel · free and open source (MIT)
 
 ![5dive for Mac: your team in its own window, and the menu bar menu listing the agents waiting on you](docs/screenshot.png)
 
@@ -26,7 +26,7 @@ npm test         # unit tests
 npm run dist     # build dist/5dive.dmg (on a Mac)
 ```
 
-Every tag `v*` builds the .dmg on a Mac in GitHub Actions, opens it once as a check, and attaches it to the release.
+Every tag `v*` builds the .dmg on a Mac in GitHub Actions, opens it once as a check, and attaches it to the release here. Downloads are served from the main repo, [5dive-ai/5dive](https://github.com/5dive-ai/5dive/releases/latest): its `mac-app-mirror` workflow copies this repo's latest `5dive.dmg` and `5dive-mac.zip` onto its Latest release within the hour. This repo stays the source.
 
 ## Privacy
 
