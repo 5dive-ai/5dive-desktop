@@ -1,10 +1,14 @@
-// 5dive for Mac: the 5dive web app in its own window, plus a menu-bar icon that
-// shows when an agent is waiting on you and opens that task on click.
+// 5dive for Mac and Windows: the 5dive web app in its own window, plus a menu-bar
+// (Mac) or tray (Windows) icon that shows when an agent is waiting on you and
+// opens that task on click. Platform differences: platform.js (DIVE-8666).
 const path = require("node:path");
 const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, shell } = require("electron");
 const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
 const { TRAFFIC_LIGHTS, wireHeaderInset } = require("./window-chrome");
+const { APP_ID, isMac, windowChrome, trayIcon, firstMenu } = require("./platform");
+
+const MAC = isMac(process.platform);
 
 const START_URL = "https://5dive.app";
 const APP_URL = "https://my.5dive.ai";
@@ -48,8 +52,7 @@ function createWindow() {
     minWidth: 380,
     minHeight: 520,
     title: "5dive",
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: TRAFFIC_LIGHTS,
+    ...windowChrome(process.platform, TRAFFIC_LIGHTS),
     backgroundColor: "#1a1a1f",
     show: false,
     webPreferences: {
@@ -78,11 +81,13 @@ function createWindow() {
   // A sign-in popup that goes on to Google closes, and the sign-in starts in the browser.
   win.webContents.on("did-create-window", (child) => stopGoogleHere(child.webContents, () => child.close()));
 
-  wireHeaderInset(win);
+  // Only the Mac window puts its buttons on the page; Windows keeps its title bar.
+  if (MAC) wireHeaderInset(win);
   win.once("ready-to-show", () => win.show());
   win.webContents.on("did-finish-load", () => setTimeout(poll, 3000));
 
-  // Closing the window keeps the app (and the menu-bar icon) running, the Mac way.
+  // Closing the window keeps the app (and the menu-bar or tray icon) running, so it
+  // can still tell you when an agent needs you. Quit from the icon's menu.
   win.on("close", (e) => {
     if (quitting) return;
     e.preventDefault();
@@ -177,8 +182,8 @@ function clip(s, n) {
 function render(next) {
   inbox = next;
   const waiting = next.state === "ok" && next.count > 0;
-  tray.setImage(nativeImage.createFromPath(asset(waiting ? "trayWaitingTemplate.png" : "trayTemplate.png")));
-  tray.setTitle(waiting ? ` ${next.count}` : "");
+  tray.setImage(nativeImage.createFromPath(asset(trayIcon(process.platform, waiting))));
+  if (MAC) tray.setTitle(waiting ? ` ${next.count}` : "");
   tray.setToolTip(
     waiting
       ? `${next.count} ${next.count === 1 ? "agent needs" : "agents need"} you`
@@ -186,7 +191,9 @@ function render(next) {
         ? "5dive: sign in to see who needs you"
         : "5dive",
   );
-  app.setBadgeCount(waiting ? next.count : 0);
+  if (MAC) app.setBadgeCount(waiting ? next.count : 0);
+  // Windows has no Dock number: a red dot on the taskbar button instead.
+  else if (win && !win.isDestroyed()) win.setOverlayIcon(waiting ? nativeImage.createFromPath(asset("badgeWin.png")) : null, waiting ? `${next.count} waiting on you` : "");
   tray.setContextMenu(buildMenu());
 }
 
@@ -218,10 +225,11 @@ function buildMenu() {
 }
 
 function appMenu() {
-  // Without an Edit menu, copy and paste do not work in a Mac app.
+  // Without an Edit menu, copy and paste do not work in a Mac app. On Windows the
+  // menu bar stays hidden until Alt (autoHideMenuBar); its shortcuts still work.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      { role: "appMenu" },
+      firstMenu(process.platform),
       { role: "editMenu" },
       {
         label: "View",
@@ -244,6 +252,9 @@ function appMenu() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  // Opening the app again (Start menu, a second double-click) brings back the one
+  // window. No link arrives this way: Google sign-in comes back over 127.0.0.1
+  // (browser-sign-in.js), the same on Windows as on the Mac, so argv is not read.
   app.on("second-instance", () => show());
   app.on("before-quit", () => {
     quitting = true;
@@ -253,10 +264,14 @@ if (!app.requestSingleInstanceLock()) {
   // Google refuses sign-in from browsers that announce themselves as Electron (and, since
   // DIVE-8657, from the app at all: its sign-in runs in the default browser, browser-sign-in.js).
   app.userAgentFallback = app.userAgentFallback.replace(/\s(Electron|5dive)\/\S+/g, "");
+  // Windows shows notifications only for the id on the installer's shortcut.
+  if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 
   app.whenReady().then(() => {
     appMenu();
-    tray = new Tray(nativeImage.createFromPath(asset("trayTemplate.png")));
+    tray = new Tray(nativeImage.createFromPath(asset(trayIcon(process.platform, false))));
+    // A Windows tray icon opens the window on a click; its menu is on right-click.
+    if (!MAC) tray.on("click", () => show());
     render(inbox);
     createWindow();
     setInterval(poll, POLL_MS);
