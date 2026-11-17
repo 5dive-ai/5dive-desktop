@@ -1,7 +1,7 @@
 {
   "name": "5dive-mac",
   "productName": "5dive",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "5dive for Mac: your AI team in its own window, with a menu-bar icon that lights up when an agent needs you.",
   "homepage": "https://github.com/5dive-ai/5dive-desktop",
   "license": "MIT",
