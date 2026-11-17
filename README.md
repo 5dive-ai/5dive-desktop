@@ -26,7 +26,7 @@ npm test         # unit tests
 npm run dist     # build dist/5dive.dmg (on a Mac)
 ```
 
-Every tag `v*` builds the .dmg on a Mac in GitHub Actions, opens it once as a check, and attaches it to the release here. Downloads are served from the main repo, [5dive-ai/5dive](https://github.com/5dive-ai/5dive/releases/latest): its `mac-app-mirror` workflow copies this repo's latest `5dive.dmg` and `5dive-mac.zip` onto its Latest release within the hour. This repo stays the source.
+Every tag `v*` builds the .dmg on a Mac in GitHub Actions, opens it once as a check, and attaches it to the release here. Downloads are served from the main repo, [5dive-ai/5dive](https://github.com/5dive-ai/5dive/releases/latest): its `mac-app-mirror` workflow copies this repo's latest `5dive.dmg` onto its Latest release within the hour. This repo stays the source.
 
 ## Privacy
 

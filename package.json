@@ -10,7 +10,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "dist": "electron-builder --mac dmg zip --universal --publish never"
+    "dist": "electron-builder --mac dmg --universal --publish never"
   },
   "devDependencies": {
     "electron": "44.11.3",
