@@ -137,6 +137,12 @@ function captureTriggers() {
   };
   if (take("notify")) notify(inbox.items);
   if (take("menu")) tray.popUpContextMenu();
+  const z = path.join(CAPTURE, "zoom");
+  if (fs.existsSync(z)) {
+    const f = Number(fs.readFileSync(z, "utf8"));
+    fs.rmSync(z, { force: true });
+    if (f > 0.5 && f <= 1) win.webContents.setZoomFactor(f);
+  }
 }
 
 function notifyNew(next) {

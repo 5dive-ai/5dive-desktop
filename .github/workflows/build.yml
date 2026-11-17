@@ -65,7 +65,7 @@ jobs:
   # account, with its menu-bar menu open. Dispatched with a one-time ticket.
   capture:
     # A push to the capture branch runs it dry (signed out) to prove the plumbing.
-    if: (github.event_name == 'workflow_dispatch' && inputs.ticket != '') || (github.event_name == 'pull_request' && github.head_ref == 'dive-8583-capture')
+    if: (github.event_name == 'workflow_dispatch' && inputs.ticket != '') || (github.event_name == 'pull_request' && endsWith(github.head_ref, '-capture'))
     runs-on: macos-latest
     steps:
       # The ticket is read at run time from the event file, never through a
