@@ -191,4 +191,19 @@ function running(state) {
   return !!state && state.step !== "done" && state.step !== "failed";
 }
 
-module.exports = { runHere, realDeps, lastLine, isFiveDivePage, running, DOCKER_POLL_MS };
+/**
+ * A browser sign-in that starts on the self-host page opened from the Mac app's door (from=mac) comes back
+ * there, so the run starts once signed in: the page to go back to, or null for any other page.
+ */
+function macRunReturn(url) {
+  if (!isFiveDivePage(url)) return null;
+  const u = new URL(url);
+  return u.pathname === "/self-host" && u.searchParams.get("from") === "mac" ? `${u.origin}/self-host?from=mac` : null;
+}
+
+/** The window has redeemed its ticket: it is on a 5dive page that is not the ticket page. */
+function signedInLanding(url) {
+  return isFiveDivePage(url) && new URL(url).pathname !== "/continue";
+}
+
+module.exports = { runHere, realDeps, lastLine, isFiveDivePage, running, macRunReturn, signedInLanding, DOCKER_POLL_MS };

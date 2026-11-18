@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { runHere, lastLine, isFiveDivePage, running } = require("../src/run-here");
+const { runHere, lastLine, isFiveDivePage, running, macRunReturn, signedInLanding } = require("../src/run-here");
 const D = require("../src/docker");
 
 const BIN = "/usr/local/bin/docker";
@@ -171,4 +171,18 @@ test("the window has a screen for every step, and the preload gives the page the
   const main = fs.readFileSync(path.join(__dirname, "..", "src", "main.js"), "utf8");
   // Every page-side call checks who is asking.
   assert.equal((main.match(/isFiveDivePage\(e\.senderFrame/g) || []).length, 2);
+});
+
+test("a Google sign-in begun on the Mac door's page comes back to it; any other page goes Home as before", () => {
+  assert.equal(macRunReturn("https://my.5dive.ai/self-host?from=mac"), "https://my.5dive.ai/self-host?from=mac");
+  assert.equal(macRunReturn("https://my.5dive.ai/self-host?from=mac&x=1#y"), "https://my.5dive.ai/self-host?from=mac");
+  for (const no of ["https://my.5dive.ai/self-host?from=hire", "https://my.5dive.ai/", "https://evil.example.com/self-host?from=mac", "", undefined]) {
+    assert.equal(macRunReturn(no), null, String(no));
+  }
+  assert.equal(signedInLanding("https://my.5dive.ai/continue?ticket=x"), false);
+  assert.equal(signedInLanding("https://my.5dive.ai/"), true);
+  assert.equal(signedInLanding("https://evil.example.com/"), false);
+  const main = fs.readFileSync(path.join(__dirname, "..", "src", "main.js"), "utf8");
+  assert.match(main, /returnAfterSignIn = macRunReturn\(win\.webContents\.getURL\(\)\);/);
+  assert.match(main, /show\(ticketUrl\(APP_URL, ticket\)\);\s*backAfterTicket\(\);/);
 });

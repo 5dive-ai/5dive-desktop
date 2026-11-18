@@ -8,7 +8,7 @@ const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
 const { TRAFFIC_LIGHTS, wireHeaderInset } = require("./window-chrome");
 const { APP_ID, isMac, windowChrome, trayIcon, firstMenu, appUserAgent } = require("./platform");
-const { runHere, realDeps, isFiveDivePage, running } = require("./run-here");
+const { runHere, realDeps, isFiveDivePage, running, macRunReturn, signedInLanding } = require("./run-here");
 const { DOCKER_DOWNLOAD, validCode } = require("./docker");
 
 const MAC = isMac(process.platform);
@@ -41,6 +41,7 @@ let runWin = null;
 let run = null;
 let runCode = null;
 let runState = null;
+let returnAfterSignIn = null; // the Run-on-this-Mac page a browser sign-in started on
 
 function isInApp(url) {
   try {
@@ -124,6 +125,8 @@ function stopGoogleHere(contents, after = () => {}) {
 }
 
 async function signInInBrowser() {
+  // DIVE-8729: a sign-in started on «Run 5dive on this Mac»'s page comes back to that page, so it carries on.
+  if (win && !win.isDestroyed()) returnAfterSignIn = macRunReturn(win.webContents.getURL());
   // A second tap while one is under way re-opens the same page (same port, same state).
   if (browserSignIn) return shell.openExternal(browserSignIn.url);
   try {
@@ -131,6 +134,7 @@ async function signInInBrowser() {
       appUrl: APP_URL,
       onTicket: (ticket) => {
         show(ticketUrl(APP_URL, ticket));
+        backAfterTicket();
         app.focus({ steal: true });
       },
       onClose: () => {
@@ -221,6 +225,26 @@ function wireRunHere() {
     runWin.close();
     show(APP_URL);
   });
+}
+
+// The ticket page signs the window in and moves on to Home; once it has left /continue, go back to the page.
+function backAfterTicket() {
+  const back = returnAfterSignIn;
+  returnAfterSignIn = null;
+  if (!back || !win) return;
+  const contents = win.webContents;
+  const done = () => {
+    contents.removeListener("did-navigate", check);
+    contents.removeListener("did-navigate-in-page", check);
+  };
+  const check = (_e, url) => {
+    if (!signedInLanding(url)) return;
+    done();
+    win.loadURL(back);
+  };
+  contents.on("did-navigate", check);
+  contents.on("did-navigate-in-page", check);
+  setTimeout(done, 60_000);
 }
 
 function show(url) {
