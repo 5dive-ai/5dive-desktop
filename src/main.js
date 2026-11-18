@@ -6,7 +6,7 @@ const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, shell } = req
 const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
 const { TRAFFIC_LIGHTS, wireHeaderInset } = require("./window-chrome");
-const { APP_ID, isMac, windowChrome, trayIcon, firstMenu } = require("./platform");
+const { APP_ID, isMac, windowChrome, trayIcon, firstMenu, appUserAgent } = require("./platform");
 
 const MAC = isMac(process.platform);
 
@@ -261,9 +261,9 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("activate", () => show());
 
-  // Google refuses sign-in from browsers that announce themselves as Electron (and, since
-  // DIVE-8657, from the app at all: its sign-in runs in the default browser, browser-sign-in.js).
-  app.userAgentFallback = app.userAgentFallback.replace(/\s(Electron|5dive)\/\S+/g, "");
+  // No "Electron/" (Google refuses it), plus a "5diveDesktop/<v>" marker the page reads
+  // to stop offering browser push, which Electron cannot deliver (platform.js, DIVE-8708).
+  app.userAgentFallback = appUserAgent(app.userAgentFallback, app.getVersion());
   // Windows shows notifications only for the id on the installer's shortcut.
   if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 

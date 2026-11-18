@@ -32,4 +32,17 @@ function firstMenu(platform) {
   return isMac(platform) ? { role: "appMenu" } : { role: "fileMenu" };
 }
 
-module.exports = { APP_ID, isMac, windowChrome, trayIcon, firstMenu };
+// The app's user agent (DIVE-8708). Google refuses sign-in from a browser that
+// announces itself as Electron (and its sign-in now runs in the default browser
+// anyway, browser-sign-in.js), so "Electron/<v>" and Electron's "5dive/<v>" app
+// token are removed. In their place one "5diveDesktop/<v>" marker, which the strip
+// pattern does not match, lets my.5dive.ai tell it is inside the app: Electron has
+// no push service, so the page must not offer browser notifications here.
+const UA_STRIP = /\s(Electron|5dive)\/\S+/g;
+const DESKTOP_MARKER = "5diveDesktop";
+
+function appUserAgent(fallback, version) {
+  return `${fallback.replace(UA_STRIP, "")} ${DESKTOP_MARKER}/${version}`;
+}
+
+module.exports = { APP_ID, isMac, windowChrome, trayIcon, firstMenu, UA_STRIP, DESKTOP_MARKER, appUserAgent };
