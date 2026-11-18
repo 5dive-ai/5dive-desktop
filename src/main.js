@@ -2,17 +2,22 @@
 // (Mac) or tray (Windows) icon that shows when an agent is waiting on you and
 // opens that task on click. Platform differences: platform.js (DIVE-8666).
 const path = require("node:path");
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, shell } = require("electron");
+const { pathToFileURL } = require("node:url");
+const { app, BrowserWindow, Menu, Notification, Tray, ipcMain, nativeImage, shell } = require("electron");
 const { INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
 const { TRAFFIC_LIGHTS, wireHeaderInset } = require("./window-chrome");
 const { APP_ID, isMac, windowChrome, trayIcon, firstMenu, appUserAgent } = require("./platform");
+const { runHere, realDeps, isFiveDivePage, running } = require("./run-here");
+const { DOCKER_DOWNLOAD, validCode } = require("./docker");
 
 const MAC = isMac(process.platform);
 
 const START_URL = "https://5dive.app";
 const APP_URL = "https://my.5dive.ai";
 const POLL_MS = 60_000;
+const PRELOAD = path.join(__dirname, "preload.js");
+const RUN_HERE_PAGE = pathToFileURL(path.join(__dirname, "run-here.html")).href;
 
 // Sign-in and payment pages may open in a popup; let those stay in the app.
 // Anything else a page opens in a new window goes to the default browser.
@@ -31,6 +36,11 @@ let inbox = { state: "unknown", count: 0, items: [] };
 let seen = new Set();
 let quitting = false;
 let browserSignIn = null; // the open 127.0.0.1 listener while a browser sign-in is under way
+// Run 5dive on this Mac (DIVE-8729): its small window, the run, and the latest code.
+let runWin = null;
+let run = null;
+let runCode = null;
+let runState = null;
 
 function isInApp(url) {
   try {
@@ -58,6 +68,8 @@ function createWindow() {
     webPreferences: {
       // A named persistent session keeps you signed in between launches.
       partition: "persist:5dive",
+      // The «Run 5dive on this Mac» bridge (preload.js); popups do not get it.
+      preload: PRELOAD,
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
@@ -130,6 +142,85 @@ async function signInInBrowser() {
     return;
   }
   shell.openExternal(browserSignIn.url);
+}
+
+// ---------------------------------------------------------------------------
+// Run 5dive on this Mac (DIVE-8729). my.5dive.ai/self-host mints the account's
+// one-time code and hands it over (preload.js runHere); the app starts the README's
+// container in Docker and runs the page's own link line inside it, while a small
+// window shows each step. The page sees the box link and moves on by itself.
+// ---------------------------------------------------------------------------
+
+function sendRunState(s) {
+  runState = s;
+  if (runWin && !runWin.isDestroyed()) runWin.webContents.send("run-here:state", s);
+}
+
+function startRun() {
+  if (run) run.stop();
+  sendRunState({ step: "checking" });
+  run = runHere({
+    code: () => runCode,
+    deps: realDeps({ home: app.getPath("home"), arch: process.arch, env: process.env }),
+    onState: sendRunState,
+  });
+}
+
+function openRunWindow() {
+  if (runWin && !runWin.isDestroyed()) {
+    runWin.show();
+    runWin.focus();
+    return;
+  }
+  runWin = new BrowserWindow({
+    width: 460,
+    height: 380,
+    resizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    title: "Run 5dive on this Mac",
+    titleBarStyle: "hiddenInset",
+    backgroundColor: "#1a1a1f",
+    show: false,
+    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  runWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  runWin.webContents.on("will-navigate", (e) => e.preventDefault());
+  runWin.once("ready-to-show", () => runWin.show());
+  // Closing it does not stop the run: a tap on the page brings it back where it is.
+  runWin.on("closed", () => {
+    runWin = null;
+  });
+  runWin.loadURL(RUN_HERE_PAGE);
+}
+
+function fromRunWin(e) {
+  return !!runWin && !runWin.isDestroyed() && e.sender === runWin.webContents;
+}
+
+function wireRunHere() {
+  // From the page: a tap (show the window, start if nothing is under way) or a fresh code.
+  ipcMain.handle("run-here:start", (e, code) => {
+    if (!MAC || !isFiveDivePage(e.senderFrame && e.senderFrame.url) || !validCode(code)) return { ok: false };
+    runCode = code;
+    if (!running(runState)) startRun();
+    openRunWindow();
+    return { ok: true };
+  });
+  ipcMain.handle("run-here:code", (e, code) => {
+    if (!MAC || !isFiveDivePage(e.senderFrame && e.senderFrame.url) || !validCode(code)) return { ok: false };
+    runCode = code;
+    return { ok: true };
+  });
+  // From the window's own page.
+  ipcMain.on("run-here:ready", (e) => fromRunWin(e) && e.sender.send("run-here:state", runState || { step: "checking" }));
+  ipcMain.on("run-here:docker", (e) => fromRunWin(e) && shell.openExternal(DOCKER_DOWNLOAD));
+  ipcMain.on("run-here:retry", (e) => fromRunWin(e) && runCode && startRun());
+  ipcMain.on("run-here:finish", (e) => {
+    if (!fromRunWin(e)) return;
+    runWin.close();
+    show(APP_URL);
+  });
 }
 
 function show(url) {
@@ -269,6 +360,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     appMenu();
+    wireRunHere();
     tray = new Tray(nativeImage.createFromPath(asset(trayIcon(process.platform, false))));
     // A Windows tray icon opens the window on a click; its menu is on right-click.
     if (!MAC) tray.on("click", () => show());
