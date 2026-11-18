@@ -5,7 +5,8 @@
 // word: the same name, the five named volumes that keep the agents, --privileged
 // (systemd runs each agent) and --restart unless-stopped. Docker is never bundled
 // or installed from here: a Mac without it gets one screen with Docker's own link.
-const path = require("node:path");
+// Mac paths whatever the OS running the code (the Windows CI job included).
+const path = require("node:path").posix;
 
 const IMAGE = "ghcr.io/5dive-ai/5dive";
 const TAG = "latest";
