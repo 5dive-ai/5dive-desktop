@@ -66,7 +66,7 @@ test("user agent: no Electron or 5dive/ token, but a 5diveDesktop marker the pag
     const out = appUserAgent(ua, pkg.version);
     assert.doesNotMatch(out, /Electron\//);
     assert.doesNotMatch(out, /\s5dive\//);
-    assert.match(out, /Chrome\/146\.0\.7680\.188 Safari\/537\.36 5diveDesktop\/0\.2\.0$/);
+    assert.match(out, new RegExp("Chrome\\/146\\.0\\.7680\\.188 Safari\\/537\\.36 5diveDesktop\\/" + pkg.version.replace(/\./g, "\\.") + "$"));
     // The marker survives the strip pattern itself.
     assert.equal(out.replace(UA_STRIP, ""), out);
   }
