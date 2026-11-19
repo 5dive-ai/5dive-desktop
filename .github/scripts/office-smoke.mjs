@@ -10,7 +10,8 @@
 //     anywhere else do not leave it; the tray inbox asks /api/proxy/me with no
 //     Authorization header;
 //  4. a CHANGED certificate (the remembered fingerprint is not this one) is
-//     refused: the server sees not one request.
+//     refused: the server sees not one request, and the «Certificate changed»
+//     warning is up in front of the window.
 //
 // Writes shots/office-*.png and shots/office-result.json; exits non-zero on any failed check.
 import { execFileSync, spawn } from "node:child_process";
@@ -212,6 +213,8 @@ async function main() {
   await sleep(12000);
   const refused = (await evaluate(target, "location.href + ' ' + document.title").catch(() => "")) || "";
   check("a changed certificate is refused: the office sees no request", seen.length === 0 && !refused.includes(TITLE), `${seen.length} requests; ${refused}`);
+  const warned = ps(`$w = New-Object -ComObject WScript.Shell; if ($w.AppActivate('Certificate changed')) { Start-Sleep -Milliseconds 600; 'yes' } else { 'no' }`);
+  check("the «certificate changed» warning is up, in front", warned === "yes", warned);
   shoot("office-3-changed-certificate.png");
 
   kill();

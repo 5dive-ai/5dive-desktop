@@ -424,14 +424,24 @@ function askTrust(origin, fingerprint) {
 function reportChangedCertificate(fingerprint) {
   if (certRefused.has(fingerprint)) return;
   certRefused.add(fingerprint);
-  dialog.showMessageBox({
+  const opts = {
     type: "warning",
-    title: "Office server",
+    // Its own title, so it is not mistaken for the trust question (and the CI smoke can find it).
+    title: "Certificate changed",
     message: "This office server's certificate changed",
     detail:
       "5dive did not connect, to keep your messages safe. Tell your IT.\n\n" +
       "If IT replaced the certificate: open Server address… and choose Forget saved certificate.",
-  });
+  };
+  // On top of the 5dive window, like the trust question. The refused page never gets ready to
+  // show, so show the window first; without a parent Windows puts the warning behind it.
+  if (win && !win.isDestroyed()) {
+    if (!win.isVisible()) win.show();
+    win.focus();
+    dialog.showMessageBox(win, opts);
+  } else {
+    dialog.showMessageBox(opts);
+  }
 }
 
 function show(url) {

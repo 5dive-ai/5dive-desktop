@@ -122,7 +122,11 @@ function readableFingerprint(fp) {
   const m = /^sha256\/(.+)$/.exec(String(fp || ""));
   if (!m) return String(fp || "");
   const hex = Buffer.from(m[1], "base64").toString("hex").toUpperCase();
-  return hex.match(/.{2}/g).join(":");
+  // 16 pairs a line, so a narrow dialog never cuts the middle off.
+  const pairs = hex.match(/.{2}/g);
+  const lines = [];
+  for (let i = 0; i < pairs.length; i += 16) lines.push(pairs.slice(i, i + 16).join(":"));
+  return lines.join("\n");
 }
 
 module.exports = {

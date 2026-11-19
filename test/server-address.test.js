@@ -112,9 +112,10 @@ test("certificate: forget lets IT's new certificate be asked about again, for th
   assert.equal(certDecision({ server: OFFICE, trusted: settings.trusted, url: `${OFFICE}/`, fingerprint: OTHER_FP }), "ask");
 });
 
-test("the fingerprint reads as hex pairs, the way a certificate viewer shows it", () => {
+test("the fingerprint reads as hex pairs, 16 a line, the way a certificate viewer shows it", () => {
   const r = readableFingerprint(FP);
-  assert.match(r, /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+  assert.match(r, /^([0-9A-F]{2}:){15}[0-9A-F]{2}\n([0-9A-F]{2}:){15}[0-9A-F]{2}$/);
+  assert.equal(r.replace("\n", ":").split(":").length, 32, "all 32 bytes, none cut");
   assert.equal(r.slice(0, 11), "AB:CD:EF:12");
   assert.equal(readableFingerprint("weird"), "weird");
 });
