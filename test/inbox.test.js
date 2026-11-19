@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { canPoll, parseEnvelope, readInbox, taskUrl, INBOX_SCRIPT } = require("../src/inbox");
+const { canPoll, parseEnvelope, readInbox, taskUrl, INBOX_SCRIPT, OFFICE_INBOX_SCRIPT } = require("../src/inbox");
 
 const env = (data) => ({ kind: "exec", stdout: JSON.stringify({ ok: true, data }) });
 const gate = (ident, extra = {}) => ({
@@ -72,4 +72,41 @@ test("page script is one expression that never sends the token anywhere but our 
   assert.match(INBOX_SCRIPT, /fetch\("\/api\/proxy\/server\/agents\/exec"/);
   assert.equal((INBOX_SCRIPT.match(/fetch\(/g) || []).length, 1);
   new Function(`return ${INBOX_SCRIPT}`); // parses
+});
+
+// DIVE-8808: on an office server the page asks with its session cookie, never a bearer.
+const runOffice = (answers) => {
+  const calls = [];
+  const fetch = async (url, opts = {}) => {
+    calls.push({ url, opts });
+    const a = answers[url] || { status: 404 };
+    return { status: a.status, ok: a.status >= 200 && a.status < 300, json: async () => a.body };
+  };
+  return new Function("fetch", `return ${OFFICE_INBOX_SCRIPT}`)(fetch).then((r) => ({ r, calls }));
+};
+
+test("office: signed out when the office says 401 on /api/proxy/me", async () => {
+  const { r, calls } = await runOffice({ "/api/proxy/me": { status: 401 } });
+  assert.deepEqual(r, { kind: "signed-out" });
+  assert.equal(calls.length, 1);
+});
+
+test("office: reads the inbox with the cookie and no Authorization header", async () => {
+  const stdout = JSON.stringify({ ok: true, data: { needs_you: 1, inbox: [{ ident: "DIVE-1", need_type: "decision", ask: "Ship it?", assignee: "marcus" }] } });
+  const { r, calls } = await runOffice({
+    "/api/proxy/me": { status: 200, body: { id: "p1", name: "Ana", role: "owner", office: true } },
+    "/api/proxy/server/agents/exec": { status: 200, body: { stdout } },
+  });
+  assert.equal(r.kind, "exec");
+  assert.deepEqual(readInbox(r).items.map((t) => t.ident), ["DIVE-1"]);
+  for (const c of calls) {
+    assert.equal(c.opts.credentials, "same-origin");
+    assert.equal(JSON.stringify(c.opts.headers || {}).toLowerCase().includes("authorization"), false);
+  }
+});
+
+test("office: an office server that does not answer the inbox stays unknown", async () => {
+  const { r } = await runOffice({ "/api/proxy/me": { status: 200, body: {} } });
+  assert.deepEqual(r, { kind: "http", status: 404 });
+  assert.equal(readInbox(r).state, "unknown");
 });

@@ -23,6 +23,12 @@ Free and open source (MIT).
 
 **Windows:** the installer is not signed yet, so Windows may say it protected your PC. Click **More info**, then **Run anyway**. It installs for you only (no admin needed) and adds 5dive to the Start menu.
 
+## Your office's own server
+
+Your firm runs 5dive on its own server? Open **Server address…** (Mac: the 5dive menu, ⌘,. Windows: File, or the tray icon) and type the address IT gives you, for example `https://192.0.2.20:8443`. The app then opens that server instead of 5dive online, and every page stays on it: a link anywhere else opens in your browser. Leave the address empty, or tap **Use 5dive online**, to go back.
+
+A server with its own (self-signed) certificate: the first time, the app shows the certificate's fingerprint and asks **Trust this office server?** Check it with IT once. The app remembers it for that address only and refuses to connect if it ever changes. If IT really replaced it, open **Server address…** and choose **Forget saved certificate**. Certificate checks stay on for everything else.
+
 ## Build it yourself
 
 ```sh
@@ -37,7 +43,7 @@ Every tag `v*` builds the .dmg on a Mac and the installer on Windows in GitHub A
 
 ## Privacy
 
-The app is the 5dive web page plus a menu-bar or tray icon. It keeps no token of its own: once a minute it asks the signed-in page the same "who needs me" question the web app's Needs-you badge asks. Every 6 hours it asks GitHub, without signing in, which version is the latest release; when it is newer, a «New version of 5dive · Download» notice opens that release's download in your browser (it installs nothing by itself). Nothing else is sent anywhere.
+The app is the 5dive web page plus a menu-bar or tray icon. It keeps no token of its own: once a minute it asks the signed-in page the same "who needs me" question the web app's Needs-you badge asks. Every 6 hours it asks GitHub, without signing in, which version is the latest release; when it is newer, a «New version of 5dive · Download» notice opens that release's download in your browser (it installs nothing by itself). Nothing else is sent anywhere. With an office server address, the page and the "who needs me" question go to that server only; the GitHub version check stays, and with no internet it simply finds nothing and says nothing.
 
 ## License
 
