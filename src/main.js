@@ -10,6 +10,7 @@ const { TRAFFIC_LIGHTS, wireHeaderInset } = require("./window-chrome");
 const { APP_ID, isMac, windowChrome, trayIcon, firstMenu, appUserAgent } = require("./platform");
 const { runHere, realDeps, isFiveDivePage, running, macRunReturn, signedInLanding } = require("./run-here");
 const { DOCKER_DOWNLOAD, validCode } = require("./docker");
+const { CHECK_EVERY_MS, checkForUpdate, readShown, writeShown, shouldPopUp } = require("./update-check");
 
 const MAC = isMac(process.platform);
 
@@ -42,6 +43,7 @@ let run = null;
 let runCode = null;
 let runState = null;
 let returnAfterSignIn = null; // the Run-on-this-Mac page a browser sign-in started on
+let update = null; // { version, url } when a newer app is out (update-check.js, DIVE-8785)
 
 function isInApp(url) {
   try {
@@ -247,6 +249,23 @@ function backAfterTicket() {
   setTimeout(done, 60_000);
 }
 
+// «New version of 5dive · Download» (DIVE-8785): a pop-up once per version, and a
+// line at the top of the menu-bar or tray menu until the update. Tapping either
+// opens that version's download in the default browser; nothing installs by itself.
+async function checkUpdate() {
+  const next = await checkForUpdate({ current: app.getVersion(), platform: process.platform });
+  const changed = (next && next.url) !== (update && update.url);
+  update = next;
+  if (changed && tray) tray.setContextMenu(buildMenu());
+  const file = path.join(app.getPath("userData"), "update-notice.json");
+  if (!shouldPopUp(update, readShown(file)) || !Notification.isSupported()) return;
+  writeShown(file, update.version);
+  const { url } = update;
+  const n = new Notification({ title: "New version of 5dive", body: `Version ${update.version} is out. Click to download.` });
+  n.on("click", () => shell.openExternal(url));
+  n.show();
+}
+
 function show(url) {
   if (!win) createWindow();
   if (url) win.loadURL(url);
@@ -314,6 +333,10 @@ function render(next) {
 
 function buildMenu() {
   const items = [];
+  if (update) {
+    const { url } = update;
+    items.push({ label: "New version of 5dive · Download", click: () => shell.openExternal(url) }, { type: "separator" });
+  }
   if (inbox.state === "ok" && inbox.items.length) {
     items.push({ label: `${inbox.count} waiting on you`, enabled: false });
     for (const t of inbox.items.slice(0, 10)) {
@@ -391,5 +414,8 @@ if (!app.requestSingleInstanceLock()) {
     render(inbox);
     createWindow();
     setInterval(poll, POLL_MS);
+    // Off the startup path: the first check waits for the window, then every 6 h.
+    setTimeout(checkUpdate, 15_000);
+    setInterval(checkUpdate, CHECK_EVERY_MS);
   });
 }
