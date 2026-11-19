@@ -47,6 +47,29 @@ const INBOX_SCRIPT = `(async () => {
   }
 })()`;
 
+// The same question on an office's own server (DIVE-8808): no Clerk there. The
+// HttpOnly session cookie rides every same-origin call and no bearer is sent;
+// GET /api/proxy/me answers 401 when this device is signed out (DIVE-8807's contract).
+const OFFICE_INBOX_SCRIPT = `(async () => {
+  try {
+    const me = await fetch("/api/proxy/me", { credentials: "same-origin" });
+    if (me.status === 401) return { kind: "signed-out" };
+    if (!me.ok) return { kind: "http", status: me.status };
+    const r = await fetch("/api/proxy/server/agents/exec", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args: ["task", "inbox", "--json"] }),
+    });
+    if (r.status === 401) return { kind: "signed-out" };
+    if (!r.ok) return { kind: "http", status: r.status };
+    const j = await r.json().catch(() => null);
+    return { kind: "exec", stdout: (j && j.stdout) || "" };
+  } catch (e) {
+    return { kind: "error", message: String(e && e.message || e) };
+  }
+})()`;
+
 // The box prints one JSON envelope: the whole stdout, or its last line.
 function parseEnvelope(stdout) {
   const s = String(stdout || "").trim();
@@ -93,4 +116,4 @@ function taskUrl(base, ident) {
   return u.toString();
 }
 
-module.exports = { APP_HOSTS, INBOX_SCRIPT, canPoll, parseEnvelope, readInbox, taskUrl };
+module.exports = { APP_HOSTS, INBOX_SCRIPT, OFFICE_INBOX_SCRIPT, canPoll, parseEnvelope, readInbox, taskUrl };

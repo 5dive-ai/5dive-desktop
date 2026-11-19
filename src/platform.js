@@ -27,9 +27,32 @@ function trayIcon(platform, waiting) {
   return waiting ? "trayWinWaiting.png" : "trayWin.png";
 }
 
-/** Top-level menu roles: the Mac app menu, or the File menu (Close, Quit) elsewhere. */
-function firstMenu(platform) {
-  return isMac(platform) ? { role: "appMenu" } : { role: "fileMenu" };
+/**
+ * The first menu: the Mac app menu, or File elsewhere, each with the app's own
+ * items (`extra`, e.g. «Server address…», DIVE-8808) where that platform keeps
+ * its settings: under About on the Mac, at the top of File on Windows.
+ */
+function firstMenu(platform, extra = []) {
+  if (!extra.length) return isMac(platform) ? { role: "appMenu" } : { role: "fileMenu" };
+  if (isMac(platform)) {
+    return {
+      role: "appMenu",
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        ...extra,
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    };
+  }
+  return { role: "fileMenu", submenu: [...extra, { type: "separator" }, { role: "quit" }] };
 }
 
 // The app's user agent (DIVE-8708). Google refuses sign-in from a browser that

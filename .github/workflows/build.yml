@@ -71,6 +71,8 @@ jobs:
           Get-Item "$env:LOCALAPPDATA\Programs\5dive\5dive.exe" | Select-Object FullName, Length
       - name: Smoke - launch, sign-in hand-back, second launch, shots
         run: node .github/scripts/win-smoke.mjs
+      - name: Smoke - office Server address, self-signed certificate (DIVE-8808)
+        run: node .github/scripts/office-smoke.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

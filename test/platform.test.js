@@ -39,6 +39,18 @@ test("first menu: the Mac app menu, File elsewhere", () => {
   assert.deepEqual(firstMenu("win32"), { role: "fileMenu" });
 });
 
+test("Server address… sits under About on the Mac and at the top of File on Windows", () => {
+  const item = { label: "Server address…" };
+  const mac = firstMenu("darwin", [item]);
+  assert.equal(mac.role, "appMenu");
+  assert.deepEqual(mac.submenu.slice(0, 3), [{ role: "about" }, { type: "separator" }, item]);
+  assert.deepEqual(mac.submenu.at(-1), { role: "quit" });
+  const win = firstMenu("win32", [item]);
+  assert.equal(win.role, "fileMenu");
+  assert.deepEqual(win.submenu[0], item);
+  assert.deepEqual(win.submenu.at(-1), { role: "quit" });
+});
+
 test("notification id matches the installer's app id", () => {
   assert.equal(APP_ID, pkg.build.appId);
 });
