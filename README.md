@@ -37,7 +37,7 @@ Every tag `v*` builds the .dmg on a Mac and the installer on Windows in GitHub A
 
 ## Privacy
 
-The app is the 5dive web page plus a menu-bar or tray icon. It keeps no token of its own: once a minute it asks the signed-in page the same "who needs me" question the web app's Needs-you badge asks. Nothing else is sent anywhere.
+The app is the 5dive web page plus a menu-bar or tray icon. It keeps no token of its own: once a minute it asks the signed-in page the same "who needs me" question the web app's Needs-you badge asks. Every 6 hours it asks GitHub, without signing in, which version is the latest release; when it is newer, a «New version of 5dive · Download» notice opens that release's download in your browser (it installs nothing by itself). Nothing else is sent anywhere.
 
 ## License
 
