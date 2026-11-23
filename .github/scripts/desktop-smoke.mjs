@@ -354,7 +354,7 @@ async function main() {
 // The plugin's bin at a pinned commit, run with Git Bash: the app's _poll/_result/
 // _stopped go to it, and the agent's own `snapshot` / `act` run beside it on a temp
 // spool. Recorded in result.realBin; it does not fail the job (MSYS is not the box).
-const PLUGIN_SHA = "d0a20ae7c8b819e5482d91295b181d4179e3b447";
+const PLUGIN_SHA = "0e6ac7cd754a9b1d58f9596ce99e78874cb6d29c";
 const BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
 const msys = (p) => p.replace(/^([A-Za-z]):/, (_m, d) => "/" + d.toLowerCase()).replace(/\\/g, "/");
 function runBash(bin, args, env, input) {
