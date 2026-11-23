@@ -137,7 +137,11 @@ function createWindow() {
 
   // Only the Mac window puts its buttons on the page; Windows keeps its title bar.
   if (MAC) wireHeaderInset(win);
-  win.once("ready-to-show", () => win.show());
+  win.once("ready-to-show", () => {
+    win.show();
+    // Opened together (`--desktop-control`): the small window stays in front of the big one.
+    if (desktopWin && !desktopWin.isDestroyed()) desktopWin.focus();
+  });
   win.webContents.on("did-finish-load", () => setTimeout(poll, 3000));
 
   // Closing the window keeps the app (and the menu-bar or tray icon) running, so it

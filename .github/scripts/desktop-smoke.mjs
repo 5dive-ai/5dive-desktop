@@ -327,8 +327,9 @@ async function main() {
   panel = (await target("desktop-control.html", 5000)) || panel;
   const list = (await evaluate(panel, `document.getElementById("list").innerText`)) || "";
   console.log(`activity list:\n${list}`);
-  check("the activity list shows the typing step, as a length", list.includes("type") && list.includes(`${TEXT.length} characters`), list.slice(0, 300));
-  check("the activity list shows the stopped job", /stopped/.test(list));
+  check("the activity list says it in plain words: typed N characters", list.includes(`typed ${TEXT.length} characters`) && list.includes("looked in"), list.slice(0, 300));
+  check("the activity list shows the stopped job", /you stopped it/.test(list));
+  check("no refs or internal words in the activity list", !/@s\w*:e\d|\bact\b|snapshot/.test(list), list.slice(0, 300));
   let file = "";
   try {
     file = fs.readFileSync(ACTIVITY, "utf8");

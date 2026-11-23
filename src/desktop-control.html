@@ -43,14 +43,36 @@
 <script>
   const $ = (id) => document.getElementById(id);
   const d = window.fiveDesktop;
+  // Plain words for each step: what a person would say they did. Refs stay in the file, not here.
+  const KIND = { send: "to send a message", post: "to post", publish: "to post", delete: "to delete", pay: "to pay" };
   function stepText(s) {
-    let t = s.do || "?";
-    if (s.ref) t += " " + s.ref;
-    if (s.app) t += " " + s.app;
-    if (s.keys) t += " " + s.keys;
-    if (typeof s.chars === "number") t += " (" + s.chars + " characters)";
-    if (s.kind) t += " · " + s.kind;
-    return t;
+    const app = s.app ? " " + s.app : "";
+    let t;
+    switch (s.do) {
+      case "type": t = "typed " + (s.chars || 0) + " characters"; break;
+      case "set": case "set-value": t = "filled in " + (s.chars || 0) + " characters"; break;
+      case "clear": t = "cleared a field"; break;
+      case "press": t = "pressed " + (s.keys || "a key"); break;
+      case "launch": t = "opened" + app; break;
+      case "close-app": t = "closed" + app; break;
+      case "focus-window": t = "brought" + app + " to the front"; break;
+      case "wait": t = "waited"; break;
+      case "scroll": case "scroll-to": t = "scrolled"; break;
+      case "select": t = "picked an option"; break;
+      case "toggle": case "check": case "uncheck": t = "ticked a box"; break;
+      case "expand": case "collapse": t = "opened a list"; break;
+      case "double-click": t = "double-clicked"; break;
+      case "right-click": t = "right-clicked"; break;
+      default: t = "clicked";
+    }
+    return KIND[s.kind] ? t + " " + KIND[s.kind] : t;
+  }
+  function jobText(a) {
+    const who = a.agent || "Your agent";
+    const where = a.app ? " in " + a.app : "";
+    if (a.op === "snapshot") return who + " looked" + where;
+    const steps = (a.steps || []).map(stepText);
+    return who + " " + (steps.length ? steps.join(", then ") : "did nothing") + where;
   }
   function show(v) {
     $("switch").setAttribute("aria-checked", v.enabled ? "true" : "false");
@@ -67,13 +89,12 @@
       when.textContent = new Date(a.time).toLocaleTimeString() + " · ";
       li.appendChild(when);
       const what = document.createElement("span");
-      const steps = (a.steps || []).map(stepText).join(", ");
-      what.textContent = (a.agent || "agent") + ": " + a.op + (a.app ? " " + a.app : "") + (steps ? " — " + steps : "");
+      what.textContent = jobText(a);
       li.appendChild(what);
       if (a.outcome !== "ok") {
         const bad = document.createElement("span");
         bad.className = "bad";
-        bad.textContent = " · " + (a.outcome === "stopped" ? "stopped" : "failed" + (a.error ? " (" + a.error + ")" : ""));
+        bad.textContent = " · " + (a.outcome === "stopped" ? "you stopped it" : "did not work");
         li.appendChild(bad);
       }
       list.appendChild(li);
