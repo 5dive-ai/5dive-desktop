@@ -1,7 +1,7 @@
 {
   "name": "5dive",
   "productName": "5dive",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "5dive for Mac and Windows: your AI team in its own window, with a menu-bar or tray icon that lights up when an agent needs you.",
   "homepage": "https://github.com/5dive-ai/5dive-desktop",
   "license": "MIT",
@@ -11,7 +11,8 @@
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "dist": "electron-builder --mac dmg --universal --publish never",
-    "dist:win": "electron-builder --win nsis --x64 --publish never"
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "fetch:agent-desktop": "node .github/scripts/fetch-agent-desktop.mjs"
   },
   "devDependencies": {
     "electron": "44.11.3",
@@ -38,7 +39,18 @@
     },
     "win": {
       "icon": "build/icon.ico",
-      "target": "nsis"
+      "target": "nsis",
+      "extraResources": [
+        {
+          "from": "third_party/agent-desktop",
+          "to": "agent-desktop",
+          "filter": [
+            "agent-desktop.exe",
+            "LICENSE",
+            "NOTICE"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,

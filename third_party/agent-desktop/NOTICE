@@ -1,0 +1,15 @@
+5dive for Windows bundles agent-desktop.
+
+agent-desktop
+By Vercel Labs and the agent-desktop contributors
+https://github.com/vercel-labs/agent-desktop
+Version: v1.3.1 (agent-desktop-v1.3.1-x86_64-pc-windows-msvc.tar.gz,
+SHA-256 6ee4b1e078f4e78792e79f16e32e4a78b9919464aa3c55629b7e27ed53a08c13)
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License. A copy of the License is
+in the LICENSE file next to this NOTICE, and at
+http://www.apache.org/licenses/LICENSE-2.0
+
+agent-desktop is shipped unmodified, as the release binary published by its
+authors. The upstream project publishes no NOTICE file of its own.

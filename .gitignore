@@ -1,3 +1,4 @@
 node_modules/
 dist/
 .DS_Store
+third_party/agent-desktop/agent-desktop.exe

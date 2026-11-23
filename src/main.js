@@ -1,9 +1,11 @@
 // 5dive for Mac and Windows: the 5dive web app in its own window, plus a menu-bar
 // (Mac) or tray (Windows) icon that shows when an agent is waiting on you and
 // opens that task on click. Platform differences: platform.js (DIVE-8666).
+const os = require("node:os");
 const path = require("node:path");
+const { spawn: spawnChild, execFile } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, nativeImage, screen, shell } = require("electron");
 const { INBOX_SCRIPT, OFFICE_INBOX_SCRIPT, canPoll, readInbox, taskUrl } = require("./inbox");
 const { isGoogleSignIn, listen, ticketUrl } = require("./browser-sign-in");
 const { TRAFFIC_LIGHTS, wireHeaderInset } = require("./window-chrome");
@@ -12,8 +14,11 @@ const { runHere, realDeps, isFiveDivePage, running, macRunReturn, signedInLandin
 const { DOCKER_DOWNLOAD, validCode } = require("./docker");
 const { CHECK_EVERY_MS, checkForUpdate, readShown, writeShown, shouldPopUp } = require("./update-check");
 const office = require("./server-address");
+const desktop = require("./desktop-control");
 
 const MAC = isMac(process.platform);
+// «Let my agent use this computer» (DIVE-9063): Windows only in slice 1; nothing of it shows on the Mac.
+const DESKTOP = process.platform === "win32";
 
 const APP_URL = office.ONLINE_APP;
 const POLL_MS = 60_000;
@@ -21,6 +26,11 @@ const PRELOAD = path.join(__dirname, "preload.js");
 const RUN_HERE_PAGE = pathToFileURL(path.join(__dirname, "run-here.html")).href;
 const SETTINGS_PRELOAD = path.join(__dirname, "settings-preload.js");
 const SETTINGS_PAGE = pathToFileURL(path.join(__dirname, "server-address.html")).href;
+const DESKTOP_PRELOAD = path.join(__dirname, "desktop-preload.js");
+const DESKTOP_PAGE = pathToFileURL(path.join(__dirname, "desktop-control.html")).href;
+const INDICATOR_PAGE = pathToFileURL(path.join(__dirname, "desktop-indicator.html")).href;
+// Opens the «Let my agent use this computer» window at launch (and from a second launch).
+const DESKTOP_ARG = "--desktop-control";
 
 // Sign-in and payment pages may open in a popup; let those stay in the app.
 // Anything else a page opens in a new window goes to the default browser.
@@ -53,6 +63,14 @@ let settingsWin = null;
 let certAsk = null; // the open «Trust this office server?» question, shared by every request waiting on it
 const certDeclined = new Set(); // "origin fingerprint" the person said Cancel to; asked again after Save
 const certRefused = new Set(); // changed certificates already reported this run
+// «Let my agent use this computer» (DIVE-9063).
+let desktopCtl = null;
+let desktopSwitch = null; // { enabled, computerId }
+let desktopSwitchFile = null;
+let desktopActivityFile = null;
+let desktopWin = null;
+let indicatorWin = null;
+let indicatorHide = null;
 
 function server() {
   return settings.server;
@@ -444,6 +462,186 @@ function reportChangedCertificate(fingerprint) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// «Let my agent use this computer» (DIVE-9063, Windows). The poll loop, the job
+// queue and Stop live in desktop-control.js; here: the switch's window, the
+// always-on-top indicator with Stop, the tray items, and the way to the box.
+// ---------------------------------------------------------------------------
+
+// The box, the same way the inbox badge reaches it: a script inside the signed-in page.
+async function pageExec(args, stdin) {
+  if (!win || win.isDestroyed()) return { kind: "not-ready" };
+  const url = win.webContents.getURL();
+  const onOffice = office.onServer(server(), url);
+  if (!onOffice && (server() || !canPoll(url))) return { kind: "not-ready" };
+  try {
+    return await win.webContents.executeJavaScript(desktop.pageExecScript(args, stdin, onOffice), true);
+  } catch {
+    return { kind: "error" };
+  }
+}
+
+// Stop must end agent-desktop and anything it started at once.
+function killTree(child) {
+  if (process.platform === "win32") {
+    execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
+  } else {
+    child.kill("SIGKILL");
+  }
+}
+
+function setupDesktop() {
+  desktopSwitchFile = path.join(app.getPath("userData"), "desktop-control.json");
+  desktopActivityFile = path.join(app.getPath("userData"), "desktop-activity.json");
+  desktopSwitch = desktop.readSwitch(desktopSwitchFile);
+  // Test-only: the Windows e2e's loopback stand-in for the box (desktop-control.js relayFromEnv).
+  const relay = desktop.relayFromEnv(process.env);
+  desktopCtl = desktop.createController({
+    exec: relay ? (args, stdin) => desktop.relayExec(relay, args, stdin) : pageExec,
+    spawn: (bin, args) => spawnChild(bin, args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] }),
+    kill: killTree,
+    binPath: () =>
+      desktop.agentDesktopPath({ env: process.env, packaged: app.isPackaged, resourcesPath: process.resourcesPath, appRoot: path.join(__dirname, "..") }),
+    computer: { id: desktopSwitch.computerId, name: os.hostname() },
+    onState: onDesktopState,
+    onActivity: (entry) => {
+      desktop.appendActivity(desktopActivityFile, entry);
+      pushDesktopView();
+    },
+  });
+  if (desktopSwitch.enabled) desktopCtl.setEnabled(true);
+  wireDesktop();
+}
+
+function setDesktopEnabled(on) {
+  desktopSwitch = { ...desktopSwitch, enabled: !!on };
+  desktop.writeSwitch(desktopSwitchFile, desktopSwitch);
+  desktopCtl.setEnabled(!!on);
+  if (tray) tray.setContextMenu(buildMenu());
+  pushDesktopView();
+}
+
+function desktopView() {
+  const s = desktopCtl.state();
+  return { enabled: s.enabled, running: s.running, name: os.hostname(), activity: desktop.readActivity(desktopActivityFile).slice(0, 50) };
+}
+
+function pushDesktopView() {
+  if (desktopWin && !desktopWin.isDestroyed()) desktopWin.webContents.send("desktop:update", desktopView());
+}
+
+function onDesktopState(s) {
+  if (s.running) showIndicator();
+  else hideIndicatorSoon();
+  if (tray) tray.setContextMenu(buildMenu());
+  pushDesktopView();
+}
+
+function openDesktopWindow() {
+  if (!DESKTOP || !desktopCtl) return;
+  if (desktopWin && !desktopWin.isDestroyed()) {
+    desktopWin.show();
+    desktopWin.focus();
+    return;
+  }
+  desktopWin = new BrowserWindow({
+    width: 520,
+    height: 520,
+    resizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    title: "Let my agent use this computer",
+    backgroundColor: "#1a1a1f",
+    show: false,
+    webPreferences: { preload: DESKTOP_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  desktopWin.setMenuBarVisibility(false);
+  desktopWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  desktopWin.webContents.on("will-navigate", (e) => e.preventDefault());
+  desktopWin.once("ready-to-show", () => desktopWin.show());
+  desktopWin.on("closed", () => {
+    desktopWin = null;
+  });
+  desktopWin.loadURL(DESKTOP_PAGE);
+}
+
+// A small always-on-top bar at the bottom right while a job runs. It shows without
+// taking focus: a typing step needs the app it types into to stay in front.
+function showIndicator() {
+  clearTimeout(indicatorHide);
+  indicatorHide = null;
+  if (indicatorWin && !indicatorWin.isDestroyed()) return;
+  const W = 380;
+  const H = 60;
+  const area = screen.getPrimaryDisplay().workArea;
+  indicatorWin = new BrowserWindow({
+    width: W,
+    height: H,
+    x: area.x + area.width - W - 16,
+    y: area.y + area.height - H - 16,
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    title: "Agent is using your computer",
+    backgroundColor: "#16161b",
+    show: false,
+    webPreferences: { preload: DESKTOP_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false },
+  });
+  indicatorWin.setAlwaysOnTop(true, "screen-saver");
+  indicatorWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  indicatorWin.webContents.on("will-navigate", (e) => e.preventDefault());
+  indicatorWin.once("ready-to-show", () => indicatorWin && !indicatorWin.isDestroyed() && indicatorWin.showInactive());
+  indicatorWin.on("closed", () => {
+    indicatorWin = null;
+  });
+  indicatorWin.loadURL(INDICATOR_PAGE);
+}
+
+// A moment's grace, so back-to-back jobs do not make it blink.
+function hideIndicatorSoon() {
+  if (indicatorHide || !indicatorWin) return;
+  indicatorHide = setTimeout(() => {
+    indicatorHide = null;
+    if (desktopCtl && desktopCtl.state().running) return;
+    if (indicatorWin && !indicatorWin.isDestroyed()) indicatorWin.destroy();
+  }, 800);
+}
+
+function fromDesktopPages(e, withIndicator) {
+  const ok = (w) => !!w && !w.isDestroyed() && e.sender === w.webContents;
+  return ok(desktopWin) || (withIndicator && ok(indicatorWin));
+}
+
+function wireDesktop() {
+  ipcMain.handle("desktop:get", (e) => (fromDesktopPages(e, true) ? desktopView() : null));
+  // The switch: only from its own window (and the tray), never from a web page or the server.
+  ipcMain.handle("desktop:set", (e, on) => {
+    if (!fromDesktopPages(e, false)) return null;
+    setDesktopEnabled(on === true);
+    return desktopView();
+  });
+  ipcMain.handle("desktop:stop", async (e) => {
+    if (!fromDesktopPages(e, true)) return null;
+    await desktopCtl.stop();
+    return desktopView();
+  });
+}
+
+function desktopMenuItems() {
+  if (!DESKTOP || !desktopCtl) return [];
+  const s = desktopCtl.state();
+  return [
+    { type: "separator" },
+    { label: "Let my agent use this computer", type: "checkbox", checked: s.enabled, click: (item) => setDesktopEnabled(item.checked) },
+    ...(s.running ? [{ label: "Stop agent", click: () => desktopCtl.stop() }] : []),
+    { label: "Agent activity…", click: () => openDesktopWindow() },
+  ];
+}
+
 function show(url) {
   if (!win) createWindow();
   if (url) win.loadURL(url);
@@ -538,6 +736,7 @@ function buildMenu() {
     { label: "Open 5dive", click: () => show() },
     { label: "Check now", click: () => poll() },
     { label: "Server address…", click: () => openSettings() },
+    ...desktopMenuItems(),
     { type: "separator" },
     { label: "Quit 5dive", role: "quit" },
   );
@@ -549,7 +748,10 @@ function appMenu() {
   // menu bar stays hidden until Alt (autoHideMenuBar); its shortcuts still work.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      firstMenu(process.platform, [{ label: "Server address…", accelerator: "CmdOrCtrl+,", click: () => openSettings() }]),
+      firstMenu(process.platform, [
+        { label: "Server address…", accelerator: "CmdOrCtrl+,", click: () => openSettings() },
+        ...(DESKTOP ? [{ label: "Let my agent use this computer…", click: () => openDesktopWindow() }] : []),
+      ]),
       { role: "editMenu" },
       {
         label: "View",
@@ -575,9 +777,12 @@ if (!app.requestSingleInstanceLock()) {
   // Opening the app again (Start menu, a second double-click) brings back the one
   // window. No link arrives this way: Google sign-in comes back over 127.0.0.1
   // (browser-sign-in.js), the same on Windows as on the Mac, so argv is not read.
-  app.on("second-instance", () => show());
+  // `--desktop-control` (Windows) opens «Let my agent use this computer» instead.
+  app.on("second-instance", (_e, argv) => (DESKTOP && argv.includes(DESKTOP_ARG) ? openDesktopWindow() : show()));
   app.on("before-quit", () => {
     quitting = true;
+    // Quitting mid-job is a Stop: agent-desktop ends with the app, and the box is told.
+    if (desktopCtl && desktopCtl.state().running) desktopCtl.stop();
   });
   app.on("activate", () => show());
 
@@ -597,11 +802,13 @@ if (!app.requestSingleInstanceLock()) {
     appMenu();
     wireRunHere();
     wireSettings();
+    if (DESKTOP) setupDesktop();
     tray = new Tray(nativeImage.createFromPath(asset(trayIcon(process.platform, false))));
     // A Windows tray icon opens the window on a click; its menu is on right-click.
     if (!MAC) tray.on("click", () => show());
     render(inbox);
     createWindow();
+    if (DESKTOP && process.argv.includes(DESKTOP_ARG)) openDesktopWindow();
     setInterval(poll, POLL_MS);
     // Off the startup path: the first check waits for the window, then every 6 h.
     setTimeout(checkUpdate, 15_000);
