@@ -2,12 +2,14 @@ name: build
 
 # Every push and PR builds the .dmg on a real Mac and opens it once (smoke), and
 # the Windows installer on a real Windows runner: silent install, launch, the
-# Google sign-in hand-back, a second launch (smoke, .github/scripts/win-smoke.mjs).
+# Google sign-in hand-back, a second launch (smoke, .github/scripts/win-smoke.mjs),
+# and «Let my agent use this computer» driving Notepad (e2e, desktop-smoke.mjs).
 # A tag v* also publishes ONE GitHub Release with 5dive.dmg and 5dive-setup.exe,
 # only once both builds passed.
 on:
   push:
-    branches: [main]
+    # dive-* : an agent's branch gets the real Mac + Windows runs before its PR exists.
+    branches: [main, "dive-*"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -56,6 +58,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Fetch the pinned agent-desktop (sha256-checked) for the installer (DIVE-9063)
+        run: npm run fetch:agent-desktop
       - name: Build the x64 installer (unsigned)
         run: npm run dist:win
         env:
@@ -73,6 +77,9 @@ jobs:
         run: node .github/scripts/win-smoke.mjs
       - name: Smoke - office Server address, self-signed certificate (DIVE-8808)
         run: node .github/scripts/office-smoke.mjs
+      - name: E2E - Let my agent use this computer, Notepad + Stop, stand-in box (DIVE-9063)
+        if: always()
+        run: node .github/scripts/desktop-smoke.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

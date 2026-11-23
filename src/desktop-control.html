@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Let my agent use this computer</title>
+<style>
+  :root { --bg: #1a1a1f; --ink: #f4f4f6; --muted: #a3a3ad; --signal: #4c8dff; --field: #2c2c34; --line: #2f2f38; --ok: #3ccf7a; --bad: #ff6b6b; }
+  @media (prefers-color-scheme: light) { :root { --bg: #ffffff; --ink: #111114; --muted: #5d5d66; --field: #eeeef2; --line: #e4e4ea; --signal: #1f6bff; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { padding: 24px 24px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .row { display: flex; align-items: center; gap: 14px; }
+  h1 { margin: 0; font-size: 18px; font-weight: 650; flex: 1; }
+  p { margin: 0; color: var(--muted); }
+  /* The switch */
+  .switch { position: relative; width: 52px; height: 30px; flex: none; border: 0; border-radius: 99px; background: var(--field); cursor: pointer; padding: 0; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .switch[aria-checked="true"] { background: var(--ok); }
+  .switch[aria-checked="true"]::after { left: 25px; }
+  .stop { min-height: 40px; border: 0; border-radius: 99px; background: var(--bad); color: #fff; font: inherit; font-weight: 650; cursor: pointer; }
+  h2 { margin: 6px 0 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  ul { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+  li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  li .when { color: var(--muted); }
+  li .bad { color: var(--bad); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="row">
+    <h1>Let my agent use this computer</h1>
+    <button class="switch" id="switch" role="switch" aria-checked="false" aria-label="Let my agent use this computer"></button>
+  </div>
+  <p id="say">Off. Your agent cannot see or use this PC.</p>
+  <button class="stop" id="stop" hidden>Stop agent</button>
+  <h2>Recent activity</h2>
+  <ul id="list"></ul>
+  <p id="empty">Nothing yet.</p>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const d = window.fiveDesktop;
+  // Plain words for each step: what a person would say they did. Refs stay in the file, not here.
+  const KIND = { send: "to send a message", post: "to post", publish: "to post", delete: "to delete", pay: "to pay" };
+  function stepText(s) {
+    const app = s.app ? " " + s.app : "";
+    let t;
+    switch (s.do) {
+      case "type": t = "typed " + (s.chars || 0) + " characters"; break;
+      case "set": case "set-value": t = "filled in " + (s.chars || 0) + " characters"; break;
+      case "clear": t = "cleared a field"; break;
+      case "press": t = "pressed " + (s.keys || "a key"); break;
+      case "launch": t = "opened" + app; break;
+      case "close-app": t = "closed" + app; break;
+      case "focus-window": t = "brought" + app + " to the front"; break;
+      case "wait": t = "waited"; break;
+      case "scroll": case "scroll-to": t = "scrolled"; break;
+      case "select": t = "picked an option"; break;
+      case "toggle": case "check": case "uncheck": t = "ticked a box"; break;
+      case "expand": case "collapse": t = "opened a list"; break;
+      case "double-click": t = "double-clicked"; break;
+      case "right-click": t = "right-clicked"; break;
+      default: t = "clicked";
+    }
+    return KIND[s.kind] ? t + " " + KIND[s.kind] : t;
+  }
+  function jobText(a) {
+    const who = a.agent || "Your agent";
+    const where = a.app ? " in " + a.app : "";
+    if (a.op === "snapshot") return who + " looked" + where;
+    const steps = (a.steps || []).map(stepText);
+    return who + " " + (steps.length ? steps.join(", then ") : "did nothing") + where;
+  }
+  function show(v) {
+    $("switch").setAttribute("aria-checked", v.enabled ? "true" : "false");
+    $("say").textContent = v.enabled
+      ? "On. Your agent can see and use apps on " + v.name + ". Stop it any time."
+      : "Off. Your agent cannot see or use this PC.";
+    $("stop").hidden = !v.running;
+    const list = $("list");
+    list.textContent = "";
+    for (const a of v.activity || []) {
+      const li = document.createElement("li");
+      const when = document.createElement("span");
+      when.className = "when";
+      when.textContent = new Date(a.time).toLocaleTimeString() + " · ";
+      li.appendChild(when);
+      const what = document.createElement("span");
+      what.textContent = jobText(a);
+      li.appendChild(what);
+      if (a.outcome !== "ok") {
+        const bad = document.createElement("span");
+        bad.className = "bad";
+        bad.textContent = " · " + (a.outcome === "stopped" ? "you stopped it" : "did not work");
+        li.appendChild(bad);
+      }
+      list.appendChild(li);
+    }
+    $("empty").hidden = !!(v.activity && v.activity.length);
+  }
+  $("switch").addEventListener("click", async () => {
+    const on = $("switch").getAttribute("aria-checked") !== "true";
+    show(await d.setEnabled(on));
+  });
+  $("stop").addEventListener("click", () => d.stop());
+  if (d) {
+    d.onUpdate(show);
+    d.get().then(show);
+  }
+</script>
+</body>
+</html>
