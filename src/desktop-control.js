@@ -102,6 +102,22 @@ const STEPS = {
   expand: refOnly("expand"),
   collapse: refOnly("collapse"),
   "scroll-to": refOnly("scroll-to"),
+  "close-app": {
+    headed: false,
+    build: (s) => {
+      const app = String(s.app || "");
+      if (!app || app.startsWith("-")) throw new Error("close-app needs an app");
+      return { args: ["close-app", app] };
+    },
+  },
+  "focus-window": {
+    headed: false,
+    build: (s) => {
+      const app = String(s.app || "");
+      if (!app || app.startsWith("-")) throw new Error("focus-window needs an app");
+      return { args: ["focus-window", "--app", app] };
+    },
+  },
   scroll: {
     headed: false,
     build: (s) => {
@@ -138,6 +154,9 @@ const STEPS = {
   },
 };
 
+// The box's own name for set.
+STEPS["set-value"] = STEPS.set;
+
 function needRef(s) {
   if (!REF.test(String(s.ref || ""))) throw new Error("this step needs a ref from the last snapshot, e.g. @s8f3k2p9:e3");
 }
@@ -154,6 +173,55 @@ function needValue(s) {
 function appArg(app) {
   const a = String(app || "");
   return a && !a.startsWith("-") ? ["--app", a] : [];
+}
+
+// ---------------------------------------------------------------------------
+// The box's argv. Since the box half landed, each step carries `argv` (agent-desktop's
+// arguments, without the binary) and typed text as the step's `stdin`; each job carries
+// `snapshot_argv`. The app runs that argv as given (spawn, no shell) once its
+// subcommand is on this list; the table above is the fallback when argv is missing.
+// ---------------------------------------------------------------------------
+
+const AD_COMMANDS = new Set([
+  "click", "right-click", "double-click", "focus", "clear", "toggle", "check", "uncheck", "expand",
+  "collapse", "scroll-to", "type", "set-value", "select", "scroll", "press", "launch", "close-app",
+  "focus-window", "wait", "snapshot",
+]);
+// agent-desktop refuses these headless on Windows (POLICY_DENIED): they take focus or
+// synthesize keys. The box does not add --headed for type, right-click or a scoped
+// press, so the app does, on Windows only.
+const HEADED_ON_WINDOWS = new Set(["type", "right-click", "double-click", "focus"]);
+
+/** A box argv → { args, stdin, timeoutMs }, or throws. `only` pins the subcommand (snapshot_argv). */
+function argvCommand(argv, stdin, { only, platform } = {}) {
+  if (!Array.isArray(argv) || !argv.length || argv.length > 32 || !argv.every((a) => typeof a === "string" && a.length <= 1024 && !a.includes("\0"))) {
+    throw new Error("argv is not a list of agent-desktop arguments");
+  }
+  const at = argv[0] === "--headed" ? 1 : 0;
+  const sub = argv[at];
+  if (!AD_COMMANDS.has(sub) || (only && sub !== only)) throw new Error(`agent-desktop "${String(sub)}" is not a command this app runs`);
+  if (stdin != null && typeof stdin !== "string") throw new Error("stdin is not text");
+  let args = argv.slice();
+  if (platform === "win32" && !at && (HEADED_ON_WINDOWS.has(sub) || (sub === "press" && args.includes("--app")))) args = ["--headed", ...args];
+  const ms = sub === "wait" ? Number(argv[at + 1]) : NaN;
+  const timeoutMs = Number.isInteger(ms) && ms >= 0 ? ms + 30_000 : STEP_TIMEOUT_MS;
+  return { args, stdin: stdin == null ? (args.includes("--stdin") ? "" : undefined) : stdin, timeoutMs };
+}
+
+/** A step from the box: its argv when it has one, else the table. */
+function stepFromBox(step, platform) {
+  if (step && Array.isArray(step.argv)) return argvCommand(step.argv, step.stdin, { platform });
+  return stepCommand(step);
+}
+
+/** The snapshot a job asks for: its snapshot_argv when valid, else our own. */
+function snapshotFromBox(job, app, platform) {
+  if (job && Array.isArray(job.snapshot_argv)) {
+    try {
+      return argvCommand(job.snapshot_argv, null, { only: "snapshot", platform });
+    } catch {}
+  }
+  return snapshotCommand(app, job && job.interactive);
 }
 
 /** One step → { args, stdin?, timeoutMs } for agent-desktop, or throws a sentence the agent reads. */
@@ -261,6 +329,7 @@ function activityEntry(job, outcome, when = new Date()) {
         if (s && s.ref) o.ref = String(s.ref);
         if (s && s.kind) o.kind = String(s.kind);
         if (s && typeof s.text === "string") o.chars = [...s.text].length;
+        else if (s && typeof s.stdin === "string") o.chars = [...s.stdin].length;
         if (s && s.keys) o.keys = String(s.keys);
         if (s && s.app) o.app = String(s.app);
         return o;
@@ -413,6 +482,7 @@ function realSleep(ms, signal) {
  *   sleep(ms, signal) — optional, for tests
  */
 function createController(deps) {
+  const platform = deps.platform || process.platform;
   const sleep = deps.sleep || realSleep;
   const onState = deps.onState || (() => {});
   const onActivity = deps.onActivity || (() => {});
@@ -502,6 +572,8 @@ function createController(deps) {
     }
   }
 
+  // The box answers {ok, delivered}; delivered:false (the job was cancelled, stopped or
+  // expired, nobody is waiting) needs nothing from the app, so the reply is not read.
   async function sendResult(job, result) {
     try {
       await deps.exec(cmd("_result", `--id=${job.id}`, "--json"), JSON.stringify(fitResult(result)));
@@ -589,13 +661,13 @@ function createController(deps) {
     });
   }
 
-  async function snapshot(app, interactive, r) {
-    return readRun(await run(snapshotCommand(app, interactive), r));
+  async function snapshot(job, app, r) {
+    return readRun(await run(snapshotFromBox(job, app, platform), r));
   }
 
   async function runJob(job, r) {
     if (job.op === "snapshot") {
-      const s = await snapshot(job.app, job.interactive, r);
+      const s = await snapshot(job, job.app, r);
       return s.ok ? { ok: true, op: "snapshot", snapshot: s.data } : { ok: false, op: "snapshot", error: s.error, code: s.code };
     }
     const steps = [];
@@ -605,7 +677,7 @@ function createController(deps) {
       if (step && step.app) lastApp = String(step.app);
       let command;
       try {
-        command = stepCommand(step);
+        command = stepFromBox(step, platform);
       } catch (e) {
         failed = { error: e.message, code: "INVALID_STEP" };
         steps.push({ ok: false, error: e.message });
@@ -621,7 +693,7 @@ function createController(deps) {
     }
     if (r.aborted) return { ok: false, op: "act", steps, error: "stopped by the owner", code: "STOPPED" };
     // A fresh look at the same app, so the agent sees what its steps did.
-    const s = await snapshot(job.app || lastApp, job.interactive, r);
+    const s = await snapshot(job, job.app || lastApp, r);
     const result = { ok: !failed, op: "act", steps };
     if (s.ok) result.snapshot = s.data;
     if (failed) {
@@ -658,7 +730,11 @@ module.exports = {
   readSwitch,
   writeSwitch,
   agentDesktopPath,
+  AD_COMMANDS,
   stepCommand,
+  argvCommand,
+  stepFromBox,
+  snapshotFromBox,
   snapshotCommand,
   readRun,
   fitResult,

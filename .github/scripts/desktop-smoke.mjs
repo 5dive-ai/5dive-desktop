@@ -100,6 +100,12 @@ function startBox() {
         res.end(JSON.stringify({ stdout: JSON.stringify(out), code: 0 }));
       };
       if (args[0] !== "desktop") return reply({ ok: false });
+      if (box.forward) {
+        const f = await box.forward(args, j.stdin);
+        if (op === "_result") box.results.set(optOf(args, "id"), { t: Date.now(), r: null, bytes: call.stdinBytes, real: true });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ stdout: f.stdout, stderr: f.stderr, code: f.code }));
+      }
       if (op === "_poll") {
         if (!box.queue.length) await new Promise((r) => (box.waiters.push(r), setTimeout(r, 5000)));
         return reply({ jobs: box.queue.splice(0), cancel: [] });
@@ -117,6 +123,15 @@ function startBox() {
     });
   });
   return new Promise((r) => server.listen(RELAY_PORT, "127.0.0.1", () => r(server)));
+}
+// Jobs in the shape the real box hands out (plugins/desktop _claim): steps carry the
+// agent-desktop argv and typed text as stdin; every job carries snapshot_argv.
+const snapArgv = (app, inter) => ["snapshot", "--app", app, ...(inter ? ["-i"] : []), "--compact"];
+function snapshotJob(id, app) {
+  return { id, op: "snapshot", app, interactive: false, agent: "ci", snapshot_argv: snapArgv(app, false) };
+}
+function actJob(id, app, steps) {
+  return { id, op: "act", app, interactive: true, agent: "ci", snapshot_argv: snapArgv(app, true), steps };
 }
 function queue(job) {
   box.queue.push(job);
@@ -249,7 +264,7 @@ async function main() {
   let snap = null;
   for (const name of ["notepad.exe", "Notepad", "notepad"]) {
     const id = `snap-${name}`;
-    queue({ id, op: "snapshot", app: name, agent: "ci" });
+    queue(snapshotJob(id, name));
     const r = await resultOf(id, 60000);
     console.log(`snapshot ${name}: ${r ? (r.r.ok ? "ok" : r.r.error) : "no result"}`);
     if (r && r.r && r.r.ok) {
@@ -264,7 +279,9 @@ async function main() {
   check("the snapshot has Notepad's edit control with a ref", !!edit, edit ? `${edit.role} ${edit.ref_id}` : roles(snap.snapshot));
   if (!edit) return;
 
-  queue({ id: "act-type", op: "act", app, agent: "ci", steps: [{ do: "type", ref: edit.ref_id, text: TEXT, kind: "send" }] });
+  // The ref is the qualified one the snapshot printed (@s…:eN), as an agent would copy it.
+  check("the ref is qualified by its snapshot", /^@[A-Za-z0-9]+:e\d+$/.test(edit.ref_id), edit.ref_id);
+  queue(actJob("act-type", app, [{ do: "type", ref: edit.ref_id, text: TEXT, kind: "send", argv: ["type", edit.ref_id, "--stdin"], stdin: TEXT }]));
   const typed = await resultOf("act-type", 90000);
   const typedOk = typed && typed.r && typed.r.ok;
   check("act: type into the edit control by ref", typedOk, typed ? JSON.stringify(typed.r.steps) + " " + (typed.r.error || "") : "no result");
@@ -273,14 +290,14 @@ async function main() {
   check("every _result fits 64 KB", [...box.results.values()].every((r) => r.bytes <= 65536), [...box.results.values()].map((r) => r.bytes).join(","));
   if (!typedOk || !readBack) {
     // Diagnostics for the next round: does the headless value write work here?
-    queue({ id: "act-set", op: "act", app, agent: "ci", steps: [{ do: "set", ref: edit.ref_id, text: TEXT }] });
+    queue(actJob("act-set", app, [{ do: "set-value", ref: edit.ref_id, text: TEXT, argv: ["set-value", edit.ref_id, "--stdin"], stdin: TEXT }]));
     const set = await resultOf("act-set", 60000);
     console.log(`diagnostic set-value: ${set ? JSON.stringify(set.r.steps) + " readback=" + JSON.stringify(set.r.snapshot || "").includes(TEXT) : "no result"}`);
   }
   shoot("desktop-2-typed.png");
 
   // 4. a long step, and Stop on the indicator
-  queue({ id: "long", op: "act", app, agent: "ci", steps: [{ do: "wait", ms: 60000 }] });
+  queue(actJob("long", app, [{ do: "wait", ms: 30000, argv: ["wait", "30000"] }]));
   const indicator = await target("desktop-indicator.html", 20000);
   check("the indicator «Agent is using your computer» shows while a job runs", !!indicator);
   const running = await until(() => adCount() > 0, 10000, 300);
@@ -320,6 +337,9 @@ async function main() {
   check("no snapshot content in the activity file", !file.includes('"tree"') && !file.includes("Untitled"));
   await pageShot(panel, "desktop-5-activity.png");
 
+  // 5b. optional: the REAL box plugin behind the stand-in, under Git Bash (not a gate yet).
+  await realBin(app, edit && edit.ref_id);
+
   // 6. off again
   await evaluate(panel, `document.getElementById("switch").click(); true`);
   await sleep(6000); // the poll out at that moment is held up to 5 s by this stand-in
@@ -328,6 +348,70 @@ async function main() {
   check("switch OFF again: no more polls", polls().length === n, `${polls().length - n} new polls`);
 
   server.close();
+}
+
+// --- the real box plugin, behind the stand-in ------------------------------------
+// The plugin's bin at a pinned commit, run with Git Bash: the app's _poll/_result/
+// _stopped go to it, and the agent's own `snapshot` / `act` run beside it on a temp
+// spool. Recorded in result.realBin; it does not fail the job (MSYS is not the box).
+const PLUGIN_SHA = "d0a20ae7c8b819e5482d91295b181d4179e3b447";
+const BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
+const msys = (p) => p.replace(/^([A-Za-z]):/, (_m, d) => "/" + d.toLowerCase()).replace(/\\/g, "/");
+function runBash(bin, args, env, input) {
+  return new Promise((resolve) => {
+    const c = spawn(BASH, [msys(bin), ...args], { env: { ...process.env, ...env }, windowsHide: true });
+    let out = "";
+    let err = "";
+    c.stdout.on("data", (d) => (out += d));
+    c.stderr.on("data", (d) => (err += d));
+    c.on("close", (code) => resolve({ code, stdout: out, stderr: err }));
+    c.on("error", (e) => resolve({ code: -1, stdout: "", stderr: e.message }));
+    c.stdin.end(input == null ? undefined : input);
+  });
+}
+async function realBin(app, ref) {
+  const rb = (result.realBin = { checks: [] });
+  const note = (name, ok, detail = "") => {
+    rb.checks.push({ name, ok: !!ok, detail: String(detail).slice(0, 600) });
+    console.log(`${ok ? "REAL-BIN PASS" : "REAL-BIN FAIL"}  ${name}${detail ? "  — " + String(detail).slice(0, 600) : ""}`);
+  };
+  if (!app || !fs.existsSync(BASH)) return note("Git Bash present", false, "skipped");
+  const r = await fetch(`https://raw.githubusercontent.com/5dive-ai/5dive-plugins/${PLUGIN_SHA}/plugins/desktop/bin/desktop`).catch(() => null);
+  if (!r || !r.ok) return note(`plugin bin at ${PLUGIN_SHA.slice(0, 7)} is fetchable`, false, `skipped: HTTP ${r && r.status}`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rb-"));
+  const bin = path.join(dir, "desktop");
+  fs.writeFileSync(bin, Buffer.from(await r.arrayBuffer()));
+  const spool = path.join(dir, "spool");
+  const uid = await new Promise((res) => {
+    const c = spawn(BASH, ["-c", "id -u"], { windowsHide: true });
+    let o = "";
+    c.stdout.on("data", (d) => (o += d));
+    c.on("close", () => res(o.trim()));
+    c.on("error", () => res(""));
+  });
+  const env = { FIVEDIVE_DESKTOP_SPOOL: msys(spool), FIVEDIVE_DESKTOP_APP_UID: uid, STATE_DIR: msys(dir), FIVEDIVE_BROWSER_APPROVAL_POLICY: msys(path.join(dir, "none.json")) };
+  rb.uid = uid;
+  // From now on the stand-in forwards the app's calls to the real bin.
+  box.forward = async (args, stdin) => runBash(bin, args.slice(1), env, stdin);
+  await sleep(8000); // the app's next poll registers the computer
+  const st = await runBash(bin, ["status", "--json"], env, null);
+  note("status: the computer is connected", /"connected":\s*true/.test(st.stdout), st.stdout + st.stderr);
+  const sn = await runBash(bin, ["snapshot", `--app=${app}`, "--json", "--timeout=60"], env, null);
+  let snapJ = null;
+  try {
+    snapJ = JSON.parse(sn.stdout.trim().split(/\r?\n/).pop());
+  } catch {}
+  note("agent snapshot through the real box", snapJ && snapJ.ok, `rc ${sn.code} ${sn.stderr.slice(0, 300)}`);
+  const e2 = snapJ && editRef(snapJ.snapshot);
+  if (e2) {
+    const T2 = " and from the box";
+    const steps = JSON.stringify([{ do: "type", ref: e2.ref_id, text: T2 }]);
+    const ac = await runBash(bin, ["act", `--steps=${steps}`, `--app=${app}`, "--json", "--timeout=90"], env, null);
+    note("agent act (type) through the real box reads back", ac.stdout.includes(T2.trim()), `rc ${ac.code} ${ac.stderr.slice(0, 300)}`);
+    const lg = await runBash(bin, ["log", "--json"], env, null);
+    note("the box's log has the act, not the typed text", lg.stdout.includes("act") && !lg.stdout.includes(T2.trim()), lg.stdout.slice(0, 400));
+  }
+  box.forward = null;
 }
 
 main()

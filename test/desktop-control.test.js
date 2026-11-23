@@ -89,11 +89,12 @@ const NOTEPAD = {
 };
 const COMPUTER = { id: "11111111-2222-4333-8444-555555555555", name: "OFFICE-PC" };
 
-function controller(box, sp) {
+function controller(box, sp, platform = "linux") {
   const activity = [];
   const states = [];
   const c = dc.createController({
-    exec: box.exec,
+    platform,
+    exec: (args, stdin) => box.exec(args, stdin),
     spawn: sp.spawn,
     kill: sp.kill,
     binPath: () => "C:\\5dive\\resources\\agent-desktop\\agent-desktop.exe",
@@ -248,6 +249,91 @@ test("the step table refuses unknown steps and flag-like values", () => {
   assert.deepEqual(dc.stepCommand({ do: "set", ref: "@s1:e1", text: "x" }), { args: ["set-value", "@s1:e1", "--stdin"], stdin: "x", timeoutMs: 120000 });
   assert.deepEqual(dc.stepCommand({ do: "focus", ref: "@s1:e1" }).args, ["--headed", "focus", "@s1:e1"]);
   assert.deepEqual(dc.stepCommand({ do: "wait", ms: 500 }).args, ["wait", "500"]);
+});
+
+// --- the box's argv --------------------------------------------------------------
+
+test("a job in the box's shape: argv run as given, stdin from the step, snapshot_argv for the closing look", async () => {
+  const box = fakeBox();
+  box.pending.push([
+    {
+      id: "b1",
+      op: "act",
+      app: "notepad.exe",
+      agent: "main",
+      interactive: true,
+      snapshot_argv: ["snapshot", "--app", "notepad.exe", "-i", "--compact"],
+      steps: [
+        { do: "click", ref: "@s1:e1", argv: ["click", "@s1:e1"] },
+        { do: "type", ref: "@s1:e1", text: "hi there", argv: ["type", "@s1:e1", "--stdin"], stdin: "hi there" },
+        { do: "scroll", ref: "@s1:e1", argv: ["scroll", "@s1:e1", "--direction", "down", "--amount", "3"] },
+      ],
+    },
+  ]);
+  const sp = fakeSpawn((args) => (args.includes("snapshot") ? { stdout: snapEnv(NOTEPAD) } : { stdout: okEnv(args[0]) }));
+  const { c, activity } = controller(box, sp, "linux");
+  c.setEnabled(true);
+  await until(() => box.of("_result").length === 1, "_result");
+  assert.deepEqual(
+    sp.runs.map((r) => r.args),
+    [["click", "@s1:e1"], ["type", "@s1:e1", "--stdin"], ["scroll", "@s1:e1", "--direction", "down", "--amount", "3"], ["snapshot", "--app", "notepad.exe", "-i", "--compact"]],
+  );
+  assert.equal(sp.runs[1].stdin, "hi there");
+  assert.equal(JSON.parse(box.of("_result")[0].stdin).ok, true);
+  await until(() => activity.length === 1, "activity");
+  assert.equal(activity[0].steps[1].chars, 8);
+  assert.ok(!JSON.stringify(activity).includes("hi there"));
+  c.setEnabled(false);
+  box.release();
+});
+
+test("on Windows the app adds --headed where agent-desktop refuses headless", () => {
+  const w = (argv) => dc.argvCommand(argv, null, { platform: "win32" }).args;
+  assert.deepEqual(w(["type", "@s1:e1", "--stdin"]), ["--headed", "type", "@s1:e1", "--stdin"]);
+  assert.deepEqual(w(["right-click", "@s1:e1"]), ["--headed", "right-click", "@s1:e1"]);
+  assert.deepEqual(w(["press", "return", "--app", "notepad.exe"]), ["--headed", "press", "return", "--app", "notepad.exe"]);
+  assert.deepEqual(w(["press", "ctrl+s"]), ["press", "ctrl+s"]);
+  assert.deepEqual(w(["--headed", "focus", "@s1:e1"]), ["--headed", "focus", "@s1:e1"], "never twice");
+  assert.deepEqual(w(["click", "@s1:e1"]), ["click", "@s1:e1"]);
+  assert.deepEqual(dc.argvCommand(["type", "@s1:e1", "--stdin"], null, { platform: "linux" }).args, ["type", "@s1:e1", "--stdin"]);
+  assert.equal(dc.argvCommand(["wait", "30000"]).timeoutMs, 60000);
+});
+
+test("an argv outside the agent-desktop allowlist never runs", async () => {
+  for (const argv of [["powershell", "-c", "x"], ["--headed", "mcp"], ["sandbox", "exec"], [], ["click", 3], "click @s1:e1"]) {
+    assert.throws(() => dc.argvCommand(argv), /not/, JSON.stringify(argv));
+  }
+  assert.throws(() => dc.argvCommand(["click", "@s1:e1"], null, { only: "snapshot" }), /not a command/);
+  const box = fakeBox();
+  box.pending.push([{ id: "bad", op: "act", app: "x", steps: [{ do: "click", argv: ["cmd.exe", "/c", "calc"] }] }]);
+  const sp = fakeSpawn(() => ({ stdout: snapEnv(NOTEPAD) }));
+  const { c } = controller(box, sp);
+  c.setEnabled(true);
+  await until(() => box.of("_result").length === 1, "_result");
+  const res = JSON.parse(box.of("_result")[0].stdin);
+  assert.equal(res.ok, false);
+  assert.match(res.steps[0].error, /cmd\.exe/);
+  assert.ok(!sp.runs.some((r) => r.args[0] === "cmd.exe"), "never spawned");
+  c.setEnabled(false);
+  box.release();
+});
+
+test("a bad snapshot_argv falls back to the app's own snapshot", () => {
+  assert.deepEqual(dc.snapshotFromBox({ snapshot_argv: ["click", "@s1:e1"], interactive: true }, "notepad.exe").args, ["snapshot", "--app", "notepad.exe", "-i"]);
+  assert.deepEqual(dc.snapshotFromBox({ snapshot_argv: ["snapshot", "--app", "a", "--compact"] }, "b").args, ["snapshot", "--app", "a", "--compact"]);
+});
+
+test("a _result answered delivered:false is dropped quietly", async () => {
+  const box = fakeBox();
+  const exec = box.exec;
+  box.exec = async (args, stdin) => (args[1] === "_result" ? (box.calls.push({ args, stdin }), { kind: "exec", stdout: '{"ok":true,"delivered":false}', code: 0 }) : exec(args, stdin));
+  box.pending.push([{ id: "x1", op: "snapshot", app: "a" }, { id: "x2", op: "snapshot", app: "a" }]);
+  const sp = fakeSpawn(() => ({ stdout: snapEnv(NOTEPAD) }));
+  const { c } = controller(box, sp);
+  c.setEnabled(true);
+  await until(() => box.of("_result").length === 2, "both results sent, the queue carried on");
+  c.setEnabled(false);
+  box.release();
 });
 
 // --- truncation -----------------------------------------------------------------
