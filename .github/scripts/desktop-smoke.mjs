@@ -198,6 +198,16 @@ function roles(snapshot) {
   return [...seen].map(([k, v]) => `${k}:${v}`).join(" ");
 }
 
+// Where the text was read back: the node and field that hold it, e.g. `textfield value="hello from 5dive"`.
+function readBackAt(snapshot, text) {
+  let hit = null;
+  walk(snapshot && snapshot.tree, (n) => {
+    if (hit) return;
+    for (const [k, v] of Object.entries(n)) if (typeof v === "string" && v.includes(text)) return (hit = `${n.role} ${n.ref_id || ""} ${k}=${JSON.stringify(v.slice(0, 80))}`);
+  });
+  return hit;
+}
+
 function kill() {
   for (const im of ["5dive.exe", "agent-desktop.exe"]) {
     try {
@@ -286,7 +296,7 @@ async function main() {
   const typedOk = typed && typed.r && typed.r.ok;
   check("act: type into the edit control by ref", typedOk, typed ? JSON.stringify(typed.r.steps) + " " + (typed.r.error || "") : "no result");
   const readBack = typed && typed.r && JSON.stringify(typed.r.snapshot || "").includes(TEXT);
-  check(`the fresh snapshot reads back "${TEXT}"`, readBack, typed && typed.r.snapshot ? roles(typed.r.snapshot) : typed && typed.r.snapshot_error);
+  check(`the fresh snapshot reads back "${TEXT}"`, readBack, typed && typed.r.snapshot ? readBackAt(typed.r.snapshot, TEXT) || roles(typed.r.snapshot) : typed && typed.r.snapshot_error);
   check("every _result fits 64 KB", [...box.results.values()].every((r) => r.bytes <= 65536), [...box.results.values()].map((r) => r.bytes).join(","));
   if (!typedOk || !readBack) {
     // Diagnostics for the next round: does the headless value write work here?
